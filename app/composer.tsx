@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, Check, Feather, Link2, LoaderCircle, LockKeyhole, Send, Trash2, XCircle } from "lucide-react";
 import { z } from "zod";
 
@@ -17,21 +17,11 @@ import {
   type DestinationResult,
   type Provider,
 } from "@/lib/domain";
+import { applyDeliveryResults, createDraft, DRAFT_KEY, DraftSchema, type Draft } from "@/lib/draft";
+import { countPostCharacters, POST_LIMITS, postTextIsValid } from "@/lib/text";
 
-const STARTER_POST =
-  "Shipped a small improvement today: our deploy preview now catches broken links before they reach production.\n\nTiny guardrail, much calmer releases.";
-const DRAFT_KEY = "twofold:draft";
 const providers = ["x", "linkedin"] satisfies ReadonlyArray<Provider>;
-const limits = { x: 280, linkedin: 3000 } satisfies Record<Provider, number>;
-
-const DraftSchema = z.object({
-  shared: z.string(),
-  x: z.string(),
-  linkedin: z.string(),
-  tailored: z.boolean(),
-  selection: z.object({ x: z.boolean(), linkedin: z.boolean() }),
-});
-type Draft = z.infer<typeof DraftSchema>;
+const ErrorResponseSchema = z.object({ error: z.string() });
 
 const ConnectionsResponseSchema = z.object({
   connections: z.array(ConnectionSummarySchema),
@@ -39,7 +29,7 @@ const ConnectionsResponseSchema = z.object({
 
 const StageCrosspostSchema = z.object({
   message: z.string().trim().min(1).max(3000),
-  providers: z.array(ProviderSchema).min(1).max(2),
+  providers: z.array(ProviderSchema).min(1).max(2).refine((items) => new Set(items).size === items.length),
 });
 
 type ConnectionState =
@@ -53,28 +43,20 @@ type PublishState =
   | { readonly kind: "complete"; readonly results: ReadonlyArray<DestinationResult> }
   | { readonly kind: "error"; readonly message: string };
 
-const emptyDraft: Draft = {
-  shared: STARTER_POST,
-  x: STARTER_POST,
-  linkedin: STARTER_POST,
-  tailored: false,
-  selection: { x: true, linkedin: true },
-};
-
-function countCharacters(value: string): number {
-  return Array.from(value).length;
-}
-
 function providerLabel(provider: Provider): string {
   return provider === "x" ? "X" : "LinkedIn";
 }
 
 export function Composer({ displayName }: { readonly displayName: string }) {
-  const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const [draft, setDraft] = useState<Draft>(() => createDraft());
   const [draftLoaded, setDraftLoaded] = useState(false);
+  const [draftSaved, setDraftSaved] = useState(false);
   const [connections, setConnections] = useState<ConnectionState>({ kind: "loading" });
   const [publishState, setPublishState] = useState<PublishState>({ kind: "idle" });
   const [notice, setNotice] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState<Provider | null>(null);
+  const publishing = useRef(false);
+  const busy = publishState.kind === "publishing";
 
   const selectedProviders = useMemo(
     () => providers.filter((provider) => draft.selection[provider]),
@@ -87,8 +69,8 @@ export function Composer({ displayName }: { readonly displayName: string }) {
   const xText = draft.tailored ? draft.x : draft.shared;
   const linkedInText = draft.tailored ? draft.linkedin : draft.shared;
   const hasLimitError =
-    (draft.selection.x && countCharacters(xText) > limits.x) ||
-    (draft.selection.linkedin && countCharacters(linkedInText) > limits.linkedin);
+    (draft.selection.x && xText.trim().length > 0 && !postTextIsValid("x", xText)) ||
+    (draft.selection.linkedin && linkedInText.trim().length > 0 && !postTextIsValid("linkedin", linkedInText));
   const allSelectedHaveText = selectedProviders.every((provider) =>
     (provider === "x" ? xText : linkedInText).trim().length > 0,
   );
@@ -98,15 +80,15 @@ export function Composer({ displayName }: { readonly displayName: string }) {
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
-      const stored = window.localStorage.getItem(DRAFT_KEY);
-      if (stored) {
-        try {
+      try {
+        const stored = window.localStorage.getItem(DRAFT_KEY);
+        if (stored) {
           const parsed = DraftSchema.safeParse(JSON.parse(stored));
           if (parsed.success) setDraft(parsed.data);
           else window.localStorage.removeItem(DRAFT_KEY);
-        } catch {
-          window.localStorage.removeItem(DRAFT_KEY);
         }
+      } catch {
+        setNotice("This browser could not restore your draft. Keep a copy before leaving.");
       }
       setDraftLoaded(true);
     });
@@ -114,7 +96,15 @@ export function Composer({ displayName }: { readonly displayName: string }) {
   }, []);
 
   useEffect(() => {
-    if (draftLoaded) window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    if (!draftLoaded) return;
+    let saved = false;
+    try {
+      window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+      saved = true;
+    } catch {
+      // The editor remains usable when browser storage is blocked or full.
+    }
+    queueMicrotask(() => setDraftSaved(saved));
   }, [draft, draftLoaded]);
 
   useEffect(() => {
@@ -154,18 +144,9 @@ export function Composer({ displayName }: { readonly displayName: string }) {
         },
         annotations: { readOnlyHint: false, untrustedContentHint: false },
         execute(input) {
+          if (publishing.current) throw new Error("Wait for publishing to finish before replacing the draft.");
           const staged = StageCrosspostSchema.parse(input);
-          const nextSelection = {
-            x: staged.providers.includes("x"),
-            linkedin: staged.providers.includes("linkedin"),
-          };
-          setDraft({
-            shared: staged.message,
-            x: staged.message.slice(0, limits.x),
-            linkedin: staged.message,
-            tailored: false,
-            selection: nextSelection,
-          });
+          setDraft(createDraft(staged.message, staged.providers));
           setPublishState({ kind: "idle" });
           return { staged: true, providers: staged.providers, requiresPublishConfirmation: true };
         },
@@ -180,9 +161,10 @@ export function Composer({ displayName }: { readonly displayName: string }) {
 
   async function loadConnections(): Promise<void> {
     try {
-      const response = await fetch("/api/connections", { cache: "no-store" });
+      const response = await fetch("/api/connections", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
       const body: unknown = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(response.status === 401 ? "Sign in to connect accounts." : "Connections are unavailable.");
+      if (response.status === 401) { window.location.assign("/login"); return; }
+      if (!response.ok) throw new Error("Connections are unavailable. Try checking again.");
       setConnections({ kind: "ready", items: ConnectionsResponseSchema.parse(body).connections });
     } catch (error) {
       setConnections({ kind: "unavailable", message: error instanceof Error ? error.message : "Connections are unavailable." });
@@ -190,7 +172,7 @@ export function Composer({ displayName }: { readonly displayName: string }) {
   }
 
   function updateShared(value: string): void {
-    setDraft((current) => ({ ...current, shared: value }));
+    setDraft((current) => ({ ...current, shared: value, x: value, linkedin: value }));
     setPublishState({ kind: "idle" });
   }
 
@@ -208,13 +190,14 @@ export function Composer({ displayName }: { readonly displayName: string }) {
     setDraft((current) => ({
       ...current,
       tailored: checked,
-      x: checked ? current.shared.slice(0, limits.x) : current.x,
-      linkedin: checked ? current.shared : current.linkedin,
     }));
     setPublishState({ kind: "idle" });
   }
 
   async function publish(): Promise<void> {
+    if (publishing.current || !draftLoaded || !allSelectedHaveText || !allSelectedConnected || hasLimitError || selectedProviders.length === 0) return;
+    publishing.current = true;
+    const previousResults = publishState.kind === "complete" ? publishState.results : [];
     setPublishState({ kind: "publishing" });
     try {
       const destinations = selectedProviders.map((provider) => ({
@@ -222,21 +205,45 @@ export function Composer({ displayName }: { readonly displayName: string }) {
         text: provider === "x" ? xText : linkedInText,
       }));
       const response = await fetch("/api/posts", {
+        signal: AbortSignal.timeout(45_000),
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ destinations }),
       });
       const body: unknown = await response.json().catch(() => null);
-      if (!response.ok) throw new Error("Twofold could not publish this draft.");
-      setPublishState({ kind: "complete", results: PublishResponseSchema.parse(body).results });
-    } catch (error) {
-      setPublishState({ kind: "error", message: error instanceof Error ? error.message : "Publishing failed." });
+      if (!response.ok) {
+        if (response.status >= 500) throw new Error("Delivery could not be confirmed. Check both feeds before publishing again.");
+        const error = ErrorResponseSchema.safeParse(body);
+        setPublishState({ kind: "error", message: error.success ? error.data.error : "Twofold could not publish this draft." });
+        return;
+      }
+      const results = PublishResponseSchema.parse(body).results;
+      if (results.length !== selectedProviders.length || new Set(results.map((result) => result.provider)).size !== selectedProviders.length || results.some((result) => !selectedProviders.includes(result.provider))) {
+        throw new Error("Delivery could not be confirmed. Check both feeds before publishing again.");
+      }
+      setDraft((current) => applyDeliveryResults(current, results));
+      setPublishState({ kind: "complete", results: [...previousResults.filter((old) => !results.some((result) => result.provider === old.provider)), ...results] });
+    } catch {
+      setDraft((current) => ({ ...current, selection: { x: false, linkedin: false } }));
+      setPublishState({ kind: "error", message: "Delivery could not be confirmed. Check both feeds before publishing again." });
+    } finally {
+      publishing.current = false;
     }
   }
 
   async function disconnect(provider: Provider): Promise<void> {
-    const response = await fetch(`/api/connections?provider=${provider}`, { method: "DELETE" });
-    if (response.ok) await loadConnections();
+    if (busy || disconnecting) return;
+    setDisconnecting(provider);
+    try {
+      const response = await fetch(`/api/connections?provider=${provider}`, { method: "DELETE", signal: AbortSignal.timeout(15_000) });
+      if (!response.ok) throw new Error("The account could not be disconnected. Try again.");
+      await loadConnections();
+      setNotice(`${providerLabel(provider)} is disconnected.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The account could not be disconnected. Try again.");
+    } finally {
+      setDisconnecting(null);
+    }
   }
 
   function clearDraft(): void {
@@ -250,7 +257,7 @@ export function Composer({ displayName }: { readonly displayName: string }) {
         <a className="brand" href="#top" aria-label="Twofold home"><span className="brand-mark">2F</span><span>Twofold</span></a>
         <div className="topbar-actions">
           <Badge variant="outline" className="privacy-badge"><LockKeyhole aria-hidden="true" /> Private workspace</Badge>
-          <a className="profile-button" href="/signout-with-chatgpt?return_to=/" title="Sign out">
+          <a className="profile-button" href="/logout" title="Sign out">
             <Avatar size="sm"><AvatarFallback>{initials}</AvatarFallback></Avatar>
             <span className="profile-name">{displayName}</span>
           </a>
@@ -263,54 +270,56 @@ export function Composer({ displayName }: { readonly displayName: string }) {
         <section className="composer-column" aria-labelledby="composer-heading">
           <div className="section-heading">
             <div><p className="eyebrow">New post</p><h1 id="composer-heading">Write once. Make it fit twice.</h1></div>
-            <Badge className="draft-badge" variant="secondary">Draft saved on this device</Badge>
+            <Badge className="draft-badge" variant="secondary" role="status">{!draftLoaded ? "Loading draft" : draftSaved ? "Draft saved on this device" : "Draft saving unavailable. Keep a copy."}</Badge>
           </div>
 
           <div className="paper-card composer-card">
-            <div className="destination-row">
-              <span className="field-label">Publish to</span>
-              <div className="destination-list">
-                {providers.map((provider) => (
-                  <label className="destination-chip" key={provider}>
-                    <NetworkIcon provider={provider} />
-                    <span>{providerLabel(provider)}</span>
-                    <Switch aria-label={`Publish to ${providerLabel(provider)}`} checked={draft.selection[provider]} onCheckedChange={(checked) => toggleProvider(provider, checked)} />
-                  </label>
-                ))}
+            <fieldset className="composer-controls" disabled={busy || !draftLoaded}>
+              <div className="destination-row">
+                <span className="field-label">Publish to</span>
+                <div className="destination-list">
+                  {providers.map((provider) => (
+                    <label className="destination-chip" key={provider}>
+                      <NetworkIcon provider={provider} />
+                      <span>{providerLabel(provider)}</span>
+                      <Switch aria-label={`Publish to ${providerLabel(provider)}`} checked={draft.selection[provider]} onCheckedChange={(checked) => toggleProvider(provider, checked)} />
+                    </label>
+                  ))}
+                </div>
               </div>
-            </div>
 
-            {!draft.tailored ? (
-              <Editor label="Post text" value={draft.shared} limit={draft.selection.x ? limits.x : limits.linkedin} onChange={updateShared} onClear={clearDraft} />
-            ) : (
-              <div className="tailored-editors">
-                <Editor label="X version" value={draft.x} limit={limits.x} onChange={(value) => updateProvider("x", value)} />
-                <Editor label="LinkedIn version" value={draft.linkedin} limit={limits.linkedin} onChange={(value) => updateProvider("linkedin", value)} />
+              {!draft.tailored ? (
+                <Editor label="Post text" value={draft.shared} provider={draft.selection.x ? "x" : "linkedin"} onChange={updateShared} onClear={clearDraft} />
+              ) : (
+                <div className="tailored-editors">
+                  <Editor label="X version" value={draft.x} provider="x" onChange={(value) => updateProvider("x", value)} onClear={clearDraft} />
+                  <Editor label="LinkedIn version" value={draft.linkedin} provider="linkedin" onChange={(value) => updateProvider("linkedin", value)} />
+                </div>
+              )}
+
+              <label className="tailor-row">
+                <span><strong>Tailor each version</strong><small>Use a short X post and a roomier LinkedIn version.</small></span>
+                <Switch aria-label="Tailor each version" checked={draft.tailored} onCheckedChange={toggleTailored} />
+              </label>
+
+              <div className="publish-row">
+                <PublishHint connections={connections} selectedProviders={selectedProviders} hasLimitError={hasLimitError} hasText={allSelectedHaveText} />
+                <Button
+                  type="button"
+                  size="lg"
+                  className="publish-button"
+                  disabled={!draftLoaded || !allSelectedHaveText || selectedProviders.length === 0 || hasLimitError || !allSelectedConnected || busy || disconnecting !== null}
+                  onClick={() => void publish()}
+                >
+                  {publishState.kind === "publishing" ? <LoaderCircle className="spin" /> : <Send />}
+                  {publishState.kind === "publishing" ? "Publishing" : `Publish to ${selectedProviders.length}`}
+                </Button>
               </div>
-            )}
-
-            <label className="tailor-row">
-              <span><strong>Tailor each version</strong><small>Use a short X post and a roomier LinkedIn version.</small></span>
-              <Switch aria-label="Tailor each version" checked={draft.tailored} onCheckedChange={toggleTailored} />
-            </label>
-
-            <div className="publish-row">
-              <PublishHint connections={connections} selectedProviders={selectedProviders} hasLimitError={hasLimitError} />
-              <Button
-                type="button"
-                size="lg"
-                className="publish-button"
-                disabled={!allSelectedHaveText || selectedProviders.length === 0 || hasLimitError || !allSelectedConnected || publishState.kind === "publishing"}
-                onClick={() => void publish()}
-              >
-                {publishState.kind === "publishing" ? <LoaderCircle className="spin" /> : <Send />}
-                {publishState.kind === "publishing" ? "Publishing" : `Publish to ${selectedProviders.length}`}
-              </Button>
-            </div>
+            </fieldset>
             <PublishResult state={publishState} />
           </div>
 
-          <aside className="setup-note"><Feather aria-hidden="true" /><div><strong>Built for one person, not a content team.</strong><p>Your API keys stay on the server. Twofold only asks for permission to publish.</p></div></aside>
+          <aside className="setup-note"><Feather aria-hidden="true" /><div><strong>Your draft stays on this device.</strong><p>Provider tokens are encrypted on the server. Posting starts when you choose Publish.</p></div></aside>
         </section>
 
         <aside className="preview-column" aria-labelledby="preview-heading">
@@ -322,7 +331,8 @@ export function Composer({ displayName }: { readonly displayName: string }) {
           </div>
           <section className="connections-card" aria-labelledby="connections-heading">
             <div><p className="eyebrow">Accounts</p><h2 id="connections-heading">Connect once</h2></div>
-            {providers.map((provider) => <ConnectionRow key={provider} provider={provider} state={connections} onDisconnect={disconnect} />)}
+            {connections.kind === "unavailable" && <Button type="button" variant="outline" size="sm" onClick={() => void loadConnections()}>Check connections again</Button>}
+            {providers.map((provider) => <ConnectionRow key={provider} provider={provider} state={connections} onDisconnect={disconnect} disabled={busy || disconnecting !== null || connections.kind === "loading"} disconnecting={disconnecting === provider} />)}
           </section>
         </aside>
       </main>
@@ -330,17 +340,18 @@ export function Composer({ displayName }: { readonly displayName: string }) {
   );
 }
 
-function Editor(props: { readonly label: string; readonly value: string; readonly limit: number; readonly onChange: (value: string) => void; readonly onClear?: () => void }) {
-  const over = countCharacters(props.value) > props.limit;
+function Editor(props: { readonly label: string; readonly value: string; readonly provider: Provider; readonly onChange: (value: string) => void; readonly onClear?: () => void }) {
+  const id = useId();
+  const over = props.value.trim().length > 0 && !postTextIsValid(props.provider, props.value);
   return (
     <div className="writing-area">
-      <label className="editor-label">{props.label}</label>
-      <Textarea aria-label={props.label} className="post-textarea" value={props.value} onChange={(event) => props.onChange(event.target.value)} placeholder="What do you want to share?" />
+      <label className="editor-label" htmlFor={id}>{props.label}</label>
+      <Textarea id={id} aria-invalid={over} aria-describedby={`${id}-count`} className="post-textarea" value={props.value} onChange={(event) => props.onChange(event.target.value)} placeholder="What do you want to share?" />
       <div className="writing-toolbar">
         <span className="link-note"><Link2 /> Links stay clickable on both networks</span>
         <div className="editor-meta">
           {props.onClear && <Button type="button" variant="ghost" size="sm" onClick={props.onClear}><Trash2 /> Clear</Button>}
-          <span className={over ? "character-count is-over" : "character-count"}>{countCharacters(props.value)} / {props.limit}</span>
+          <span id={`${id}-count`} className={over ? "character-count is-over" : "character-count"}>{countPostCharacters(props.provider, props.value)} / {POST_LIMITS[props.provider]}</span>
         </div>
       </div>
     </div>
@@ -352,7 +363,7 @@ function FeedPreview(props: { readonly provider: Provider; readonly message: str
   const identity = props.connection?.accountHandle ? `@${props.connection.accountHandle}` : isX ? "@yourhandle" : "Your LinkedIn profile";
   return (
     <article className={`feed-card ${isX ? "x-preview" : "linkedin-preview"}`} aria-label={`${providerLabel(props.provider)} post preview`}>
-      <div className="feed-card-topline"><span className="network-label"><NetworkIcon provider={props.provider} /> Preview</span><span>{countCharacters(props.message)} / {limits[props.provider]}</span></div>
+      <div className="feed-card-topline"><span className="network-label"><NetworkIcon provider={props.provider} /> Preview</span><span>{countPostCharacters(props.provider, props.message)} / {POST_LIMITS[props.provider]}</span></div>
       <div className="post-head"><Avatar><AvatarFallback>{props.initials}</AvatarFallback></Avatar><div><strong>{props.connection?.accountName ?? props.displayName}</strong><span>{identity} · now</span></div></div>
       <p className="preview-copy">{props.message || "Your post will appear here."}</p>
       <div className="engagement-line">{(isX ? ["Reply", "Repost", "Like", "Share"] : ["Like", "Comment", "Repost", "Send"]).map((label) => <span key={label}>{label}</span>)}</div>
@@ -368,23 +379,26 @@ function connectionFor(state: ConnectionState, provider: Provider): ConnectionSu
   return state.kind === "ready" ? state.items.find((item) => item.provider === provider) ?? null : null;
 }
 
-function ConnectionRow(props: { readonly provider: Provider; readonly state: ConnectionState; readonly onDisconnect: (provider: Provider) => Promise<void> }) {
+function ConnectionRow(props: { readonly provider: Provider; readonly state: ConnectionState; readonly onDisconnect: (provider: Provider) => Promise<void>; readonly disabled: boolean; readonly disconnecting: boolean }) {
   const connection = connectionFor(props.state, props.provider);
   return (
     <div className="connection-row">
       <NetworkIcon provider={props.provider} />
       <div><strong>{providerLabel(props.provider)}</strong><span>{connection ? connection.accountHandle ? `@${connection.accountHandle}` : connection.accountName : props.state.kind === "loading" ? "Checking connection" : "Not connected"}</span></div>
       {connection ? (
-        <Button type="button" size="sm" variant="ghost" onClick={() => void props.onDisconnect(props.provider)}>Disconnect</Button>
+        <Button type="button" size="sm" variant="ghost" disabled={props.disabled} onClick={() => void props.onDisconnect(props.provider)}>{props.disconnecting ? "Disconnecting" : "Disconnect"}</Button>
       ) : (
-        <Button asChild size="sm" variant="outline"><a href={`/api/oauth/${props.provider}`}>Connect <ArrowUpRight /></a></Button>
+        <Button asChild size="sm" variant="outline" disabled={props.disabled}><a href={props.disabled ? undefined : `/api/oauth/${props.provider}`}>Connect <ArrowUpRight /></a></Button>
       )}
     </div>
   );
 }
 
-function PublishHint(props: { readonly connections: ConnectionState; readonly selectedProviders: ReadonlyArray<Provider>; readonly hasLimitError: boolean }) {
-  if (props.hasLimitError) return <p className="error-hint"><XCircle /> One version is over its character limit.</p>;
+function PublishHint(props: { readonly connections: ConnectionState; readonly selectedProviders: ReadonlyArray<Provider>; readonly hasLimitError: boolean; readonly hasText: boolean }) {
+  if (props.selectedProviders.length === 0) return <p>Select a network for your next post.</p>;
+  if (props.hasLimitError) return <p className="error-hint"><XCircle /> One version is invalid or over its character limit.</p>;
+  if (!props.hasText) return <p>Write a post for each selected network.</p>;
+  if (props.connections.kind === "loading") return <p>Checking your accounts.</p>;
   if (props.connections.kind === "unavailable") return <p><LockKeyhole /> {props.connections.message}</p>;
   const missing = props.selectedProviders.filter((provider) => !connectionFor(props.connections, provider));
   if (missing.length) return <p><LockKeyhole /> Connect {missing.map(providerLabel).join(" and ")} to publish.</p>;
@@ -399,7 +413,7 @@ function PublishResult({ state }: { readonly state: PublishState }) {
       {state.results.map((result) => result.kind === "published" ? (
         <a key={result.provider} href={result.postUrl} target="_blank" rel="noreferrer"><Check /> {providerLabel(result.provider)} published <ArrowUpRight /></a>
       ) : (
-        <span key={result.provider} className="failed-result"><XCircle /> {providerLabel(result.provider)}: {result.message}</span>
+        <span key={result.provider} className="failed-result"><XCircle /> {providerLabel(result.provider)}: {result.message}{result.kind === "failed" && result.reconnect && <a href={`/api/oauth/${result.provider}`}>Reconnect</a>}</span>
       ))}
     </output>
   );

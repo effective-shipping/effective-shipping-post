@@ -1,23 +1,22 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { getAppUser } from "@/lib/auth";
 import { saveConnection } from "@/lib/connections";
 import { openJson } from "@/lib/crypto";
 import { OAuthStateSchema, ProviderSchema } from "@/lib/domain";
 import { exchangeOAuthCode } from "@/lib/providers";
 
-const OAUTH_COOKIE = "twofold_oauth";
-
 export async function GET(request: NextRequest, context: { params: Promise<{ provider: string }> }) {
-  const user = await getChatGPTUser();
-  if (!user) return NextResponse.redirect(new URL("/signin-with-chatgpt?return_to=/", request.url));
+  const user = await getAppUser();
+  if (!user) return NextResponse.redirect(new URL("/login?returnTo=/", request.url));
   const providerResult = ProviderSchema.safeParse((await context.params).provider);
   if (!providerResult.success) return NextResponse.redirect(new URL("/?notice=oauth-failed", request.url));
 
   const cookieStore = await cookies();
-  const sealedState = cookieStore.get(OAUTH_COOKIE)?.value;
-  cookieStore.delete(OAUTH_COOKIE);
+  const oauthCookie = `twofold_oauth_${providerResult.data}`;
+  const sealedState = cookieStore.get(oauthCookie)?.value;
+  cookieStore.delete(oauthCookie);
 
   try {
     if (!sealedState) throw new Error("Missing OAuth state.");
@@ -30,7 +29,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
       state !== oauthState.state ||
       providerResult.data !== oauthState.provider ||
       user.userId !== oauthState.userId ||
-      Date.now() > oauthState.expiresAt
+      Date.now() >= oauthState.expiresAt
     ) throw new Error("OAuth state did not match.");
 
     const redirectUri = `${new URL(request.url).origin}/api/oauth/${oauthState.provider}/callback`;

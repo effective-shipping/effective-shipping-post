@@ -1,16 +1,14 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { getAppUser } from "@/lib/auth";
 import { randomBase64Url, sealJson, sha256Base64Url } from "@/lib/crypto";
 import { ProviderSchema } from "@/lib/domain";
 import { authorizationUrl, providerIsConfigured } from "@/lib/providers";
 
-const OAUTH_COOKIE = "twofold_oauth";
-
 export async function GET(request: NextRequest, context: { params: Promise<{ provider: string }> }) {
-  const user = await getChatGPTUser();
-  if (!user) return NextResponse.redirect(new URL("/signin-with-chatgpt?return_to=/", request.url));
+  const user = await getAppUser();
+  if (!user) return NextResponse.redirect(new URL("/login?returnTo=/", request.url));
 
   const parsedProvider = ProviderSchema.safeParse((await context.params).provider);
   if (!parsedProvider.success) return NextResponse.json({ error: "Unknown provider." }, { status: 404 });
@@ -28,7 +26,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
     expiresAt: Date.now() + 10 * 60 * 1000,
   });
   const cookieStore = await cookies();
-  cookieStore.set(OAUTH_COOKIE, sealedState, {
+  cookieStore.set(`twofold_oauth_${provider}`, sealedState, {
     httpOnly: true,
     sameSite: "lax",
     secure: request.nextUrl.protocol === "https:",
@@ -43,4 +41,3 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
     codeChallenge: await sha256Base64Url(codeVerifier),
   }));
 }
-

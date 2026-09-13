@@ -1,4 +1,4 @@
-CREATE TABLE `connections` (
+CREATE TABLE IF NOT EXISTS `connections` (
 	`user_id` text NOT NULL,
 	`provider` text NOT NULL,
 	`account_id` text NOT NULL,

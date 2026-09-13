@@ -1,54 +1,33 @@
 # Twofold architecture
 
-## Phase tracker
+Twofold posts directly to the selected networks. A private two-network composer needs independent delivery results, but it does not need a queue until scheduling becomes a requirement.
 
-- [x] Ground: greenfield project, so there is no existing posting flow to preserve.
-- [x] Sketch: compare direct-request publishing with a queued worker design.
-- [x] Agree: proceed with the smaller direct-request design.
-- [x] Implement: the interfaces below use real OAuth and provider calls.
-- [ ] Scrap: only needed if provider APIs force durable job state.
+## Authentication and connections
 
-## Caller usage
+`lib/auth.ts` reads the encrypted HttpOnly session cookie and checks its expiry and password fingerprint. The session belongs to the single `personal` account. `app/api/session` compares password hashes and creates or clears the cookie. Changing the configured password invalidates existing sessions.
 
-```ts
-const request = PublishRequest.parse(await httpRequest.json())
-const session = await providerSession.read(httpRequest)
-const result = await publisher.publish(request, session)
-return Response.json(result)
-```
+Each provider's OAuth cookie carries encrypted state, the personal account ID, an expiry, and a PKCE verifier. The callback checks all of these before exchanging the code. Provider-specific cookie names let X and LinkedIn connections start independently.
 
-The browser sends one message and the selected destinations. The server validates it once, posts to each connected network independently, and returns one result for each network. A LinkedIn failure must not hide a successful X post, or the reverse.
+`lib/connections.ts` stores access and refresh tokens encrypted with AES-GCM in D1, keyed by user ID and provider. The browser receives only account names and handles. Tokens refresh before expiry when the provider grants a refresh token. An expired connection without a usable refresh token requires reconnection.
 
-## Candidate A: direct fan-out
+## Drafts and delivery
 
-```ts
-type Provider = "x" | "linkedin"
+`app/composer.tsx` owns the editor, previews, browser storage, and account controls. `lib/draft.ts` defines the saved draft shape and updates selections after delivery. Tailoring preserves the complete copy. It never truncates a message to fit a network.
 
-type DestinationResult =
-  | { readonly kind: "published"; readonly provider: Provider; readonly postUrl: string }
-  | { readonly kind: "failed"; readonly provider: Provider; readonly message: string }
+`lib/text.ts` gives the editor and server the same character rules. X uses the official weighted counter. LinkedIn uses a 3,000-character limit, and its HTTP adapter escapes reserved punctuation before sending plain text.
 
-type Publisher = {
-  readonly publish: (request: PublishRequest, session: ProviderSession) => Effect.Effect<
-    ReadonlyArray<DestinationResult>
-  >
-}
-```
+`lib/domain.ts` parses publish requests before either network receives a create request. `app/api/posts` calls `lib/providers.ts` concurrently through Effect and returns one result per destination:
 
-Modules:
+- `published` includes the provider's post URL.
+- `failed` means delivery was rejected or could not start. It includes a message and whether to reconnect.
+- `uncertain` means delivery may have happened, but a transport error or incomplete response prevented confirmation.
 
-- `app/composer.tsx` owns editable UI state and renders network previews.
-- `app/api/oauth/[provider]` starts and completes provider OAuth.
-- `app/api/connections` reports and removes connections.
-- `app/api/posts` validates one publish request and fans out to providers.
-- `lib/session.ts` encrypts provider tokens into an HttpOnly cookie.
-- `lib/providers.ts` contains the X and LinkedIn HTTP adapters.
-- `lib/domain.ts` owns schemas and result types.
+The editor locks while publishing. It deselects successful and uncertain destinations, retains the draft, and leaves rejected destinations selected for retry. After a retry, it keeps the other destination's earlier result visible. If the entire response is lost, both destinations are deselected and the user must check the feeds before trying again.
 
-## Candidate B: durable queue
+Create requests have a 20-second timeout and no automatic retries. A server-side queue would need durable delivery records and provider-specific duplicate prevention before it could safely change that policy.
 
-The browser would create a draft record, enqueue one delivery per provider, and poll delivery status. This shape supports scheduling and automatic retries, but it needs a database, a queue, idempotency records, cleanup rules, and an operations view.
+## Runtime
 
-## Synthesis decision
+Vinext builds React server and client code for Cloudflare Workers. The Sites build plugin stages hosting metadata and Drizzle migrations alongside the Worker. `wrangler.local.jsonc` uses the same local D1 ID as the development server, while `wrangler.direct.jsonc` configures the direct production deployment.
 
-Use candidate A. Twofold is a private, two-network tool, and direct fan-out keeps the product small. Effect provides typed error handling and controlled concurrency without introducing a database. If scheduling or automatic cross-posting becomes a real requirement, candidate B can replace the `Publisher` implementation while the request and result types stay stable.
+The Node regression tests check character rules and retry selections. The smoke script exercises the actual running app, session cookies, and D1 without sending live posts.

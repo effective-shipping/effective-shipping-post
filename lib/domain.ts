@@ -1,11 +1,13 @@
 import { z } from "zod";
 
+import { postTextIsValid } from "./text";
+
 export const ProviderSchema = z.enum(["x", "linkedin"]);
 export type Provider = z.infer<typeof ProviderSchema>;
 
 const XDestinationSchema = z.object({
   provider: z.literal("x"),
-  text: z.string().trim().min(1).max(280),
+  text: z.string().trim().min(1).refine((text) => postTextIsValid("x", text), "X text is invalid or over its character limit."),
 });
 
 const LinkedInDestinationSchema = z.object({
@@ -28,14 +30,12 @@ export const PublishRequestSchema = z.object({
 });
 export type PublishRequest = z.infer<typeof PublishRequestSchema>;
 
-export type DestinationResult =
-  | { readonly kind: "published"; readonly provider: Provider; readonly postUrl: string }
-  | { readonly kind: "failed"; readonly provider: Provider; readonly message: string; readonly reconnect: boolean };
-
 export const DestinationResultSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("published"), provider: ProviderSchema, postUrl: z.string().url() }),
   z.object({ kind: z.literal("failed"), provider: ProviderSchema, message: z.string(), reconnect: z.boolean() }),
+  z.object({ kind: z.literal("uncertain"), provider: ProviderSchema, message: z.string() }),
 ]);
+export type DestinationResult = z.infer<typeof DestinationResultSchema>;
 
 export const PublishResponseSchema = z.object({
   results: z.array(DestinationResultSchema).min(1).max(2),

@@ -1,12 +1,17 @@
 import { Effect } from "effect";
 import { NextRequest, NextResponse } from "next/server";
 
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { getAppUser } from "@/lib/auth";
 import { PublishRequestSchema } from "@/lib/domain";
 import { publishDestination } from "@/lib/providers";
+import { hasAllowedOrigin } from "@/lib/request";
 
 export async function POST(request: NextRequest) {
-  const user = await getChatGPTUser();
+  if (!hasAllowedOrigin(request)) return NextResponse.json({ error: "Request origin is not allowed." }, { status: 403 });
+  if (!request.headers.get("Content-Type")?.startsWith("application/json")) {
+    return NextResponse.json({ error: "Send a JSON request." }, { status: 415 });
+  }
+  const user = await getAppUser();
   if (!user) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
   const body: unknown = await request.json().catch(() => null);
   const parsed = PublishRequestSchema.safeParse(body);
@@ -22,4 +27,3 @@ export async function POST(request: NextRequest) {
   );
   return NextResponse.json({ results });
 }
-
