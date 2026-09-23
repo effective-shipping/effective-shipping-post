@@ -58,5 +58,5 @@ for (const harness of harnesses) {
 if (installed === 0) {
   console.info(`No supported agent CLI found. Register this MCP server manually: ${serverCommand.join(" ")}`);
 } else {
-  console.info("Restart your agent session, then run /tweet. The MCP server starts Twofold on http://localhost:5173 when needed.");
+  console.info("Start a new agent session, then run /tweet in Claude Code or $tweet in Codex. The MCP server starts Twofold on http://localhost:5173 when needed.");
 }

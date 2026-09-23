@@ -32,7 +32,7 @@ Coding agents reach Twofold through `mcp/server.ts`, a stdio MCP server with one
 
 `/?draft=<id>` loads the staged draft through `GET /api/drafts/<id>`, which requires the browser session, and then removes the ID from the address bar. If the staged draft replaces unpublished text, the notice offers to restore it. After loading, the draft lives in browser storage like any other.
 
-The HTTP API is the boundary between agents and delivery. A self-hosted MCP server starts the local app on demand. A hosted Twofold would issue a token per user and map it to that user in `getApiUserId`, without changing the MCP server or the editor. The `/tweet` skill in `skills/tweet` holds the drafting guidance, and `npm run setup:agent` links it for each agent CLI.
+The HTTP API is the boundary between agents and delivery. A self-hosted MCP server starts the local app on demand. A hosted Twofold would issue a token per user and map it to that user in `getApiUserId`, without changing the MCP server or the editor. The `tweet` skill in `skills/tweet` holds the drafting guidance. Claude Code runs it as `/tweet` and Codex as `$tweet`, and `npm run setup:agent` links it for each agent CLI.
 
 ## Runtime
 

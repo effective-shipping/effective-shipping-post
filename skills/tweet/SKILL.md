@@ -1,8 +1,8 @@
 ---
 name: tweet
-description: Draft a post for X and LinkedIn from what happened in this session, then open it in Twofold for the user to edit and publish. Use for /tweet, or when the user asks to post, tweet, or share something from the current work.
+description: Draft a post for X and LinkedIn from what happened in this session, then open it in Twofold for the user to edit and publish. Use for /tweet (Claude Code), $tweet (Codex), or when the user asks to post, tweet, or share something from the current work.
 argument-hint: "[angle or topic]"
-allowed-tools: mcp__twofold__stage_post
+allowed-tools: mcp__twofold__stage_post, Read(~/.twofold/voice.md)
 ---
 
 # Draft a post from this session
@@ -11,7 +11,7 @@ Turn something from this session into a post, then stage it in Twofold with the 
 
 ## 1. Pick the one thing worth sharing
 
-If the user gave an angle or topic after `/tweet`, use it. Otherwise pick the single most interesting thing from the session: a surprising cause, a fix that generalizes, a tradeoff, a number, or a tool that saved time. Prefer one concrete idea over a summary of everything.
+If the user gave an angle or topic with the command, use it. Otherwise pick the single most interesting thing from the session: a surprising cause, a fix that generalizes, a tradeoff, a number, or a tool that saved time. Prefer one concrete idea over a summary of everything.
 
 ## 2. Keep private things out
 
@@ -30,6 +30,7 @@ If `~/.twofold/voice.md` exists, read it first and follow it. It is the user's o
 Otherwise:
 
 - Write in the first person, as the user. Be plain and specific: say what happened and what you learned.
+- State only what the session shows. Do not invent experiences, feelings, effort, or numbers. If a line needs a fact you do not have, leave it out.
 - Lead with the finding, not the setup. No hype, no "🧵", and no engagement bait.
 - Use at most one hashtag, and only when it helps someone find the post. Use no emoji unless the user asks.
 - Include a link only when it is public and adds something, such as the project, the docs, or the issue.

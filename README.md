@@ -28,7 +28,7 @@ You can edit drafts without provider credentials. Publishing requires a connecte
 
 ## Draft posts from your coding agent
 
-Twofold includes an MCP server and a `/tweet` skill for Claude Code and Codex. When a session turns up something worth sharing, run `/tweet`, optionally followed by an angle. The agent drafts a post from the session and stages it in Twofold. Twofold opens in your browser so you can edit and publish. Agents can stage drafts but cannot publish them.
+Twofold includes an MCP server and a `tweet` skill for Claude Code and Codex. When a session turns up something worth sharing, invoke the skill, optionally followed by an angle: `/tweet` in Claude Code, or `$tweet` in Codex. Codex has no custom slash commands, so `/tweet` is unrecognized there. The agent drafts a post from the session and stages it in Twofold. Twofold opens in your browser so you can edit and publish. Agents can stage drafts but cannot publish them.
 
 1. Complete [Run locally](#run-locally). `setup:local` also generates the `API_TOKEN` that the MCP server uses.
 2. Install the skill and register the MCP server for each agent CLI on your machine:
@@ -37,7 +37,7 @@ Twofold includes an MCP server and a `/tweet` skill for Claude Code and Codex. W
    npm run setup:agent
    ```
 
-3. Restart your agent session and run `/tweet`.
+3. Start a new agent session and run `/tweet` in Claude Code or `$tweet` in Codex.
 
 If Twofold is not running, the MCP server starts it on `http://localhost:5173` and leaves it running for your review. Its log is `.wrangler/twofold-app.log`. To stop it, run `kill $(cat .wrangler/twofold-app.pid)`.
 
