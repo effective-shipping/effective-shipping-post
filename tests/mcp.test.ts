@@ -66,8 +66,8 @@ test("agents can stage a post but have no way to publish", async () => {
     assert.match(tools[0].description ?? "", /Never invent experiences/u);
     assert.match(tools[0].description ?? "", /Mention Belgrade when it fits\./u);
     const { prompts } = await client.listPrompts();
-    assert.deepEqual(prompts.map((prompt) => prompt.name), ["tweet"]);
-    const prompt = await client.getPrompt({ name: "tweet", arguments: { angle: "the login bug" } });
+    assert.deepEqual(prompts.map((prompt) => prompt.name), ["post"]);
+    const prompt = await client.getPrompt({ name: "post", arguments: { angle: "the login bug" } });
     assert.match(JSON.stringify(prompt.messages), /about the login bug from this session/u);
 
     const result = await client.callTool({ name: "stage_post", arguments: { text: "Long LinkedIn post", x: "Short X post", open: false } });

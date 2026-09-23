@@ -20,6 +20,18 @@ export function linkedInPlainText(value: string): string {
   return value.replace(/[|{}@\[\]()<>#\\*_~]/gu, "\\$&");
 }
 
+// X's web intent opens its own composer with the text filled in. It needs no developer app and no
+// API call, so it works before X is connected and costs nothing.
+export function xComposerUrl(value: string): string {
+  const url = new URL("https://x.com/intent/post");
+  url.searchParams.set("text", value.trim());
+  return url.href;
+}
+
+export function hasLink(value: string): boolean {
+  return twitterText.extractUrls(value).length > 0;
+}
+
 export type PreviewSegment = { readonly kind: "text" | "entity"; readonly value: string };
 
 // Marks the text each network turns into links. LinkedIn receives mentions and hashtags as literal text.

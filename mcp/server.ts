@@ -22,7 +22,7 @@ type Config = {
 };
 
 // The drafting rules live here, in the tool description, so every MCP client gets them, whether or
-// not it has the /tweet skill installed.
+// not it has the /post skill installed.
 const draftingRules = `How to write the post:
 - Pick the single most useful thing from the session: a surprising cause, a fix that generalizes, a tradeoff, a number, or a tool that saved time. Use the user's angle when they give one.
 - Write in the first person, as the user, plainly and specifically. Lead with the finding. No hype, no thread emoji, no engagement bait, at most one hashtag, and no emoji unless asked.
@@ -147,9 +147,9 @@ server.registerTool(
 );
 
 server.registerPrompt(
-  "tweet",
+  "post",
   {
-    title: "Tweet this",
+    title: "Post this",
     description: "Draft a post from this session and open it in Twofold for review.",
     argsSchema: { angle: z.string().optional().describe("What the post should be about. Defaults to the most useful thing from the session.") },
   },

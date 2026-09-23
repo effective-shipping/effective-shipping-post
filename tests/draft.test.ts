@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { applyDeliveryResults, createDraft, DraftSchema, StageDraftRequestSchema, stagedDraft } from "../lib/draft";
-import { countPostCharacters, linkedInPlainText, previewSegments } from "../lib/text";
+import { countPostCharacters, hasLink, linkedInPlainText, previewSegments, xComposerUrl } from "../lib/text";
 
 test("new drafts contain no sample copy and retain the entire message", () => {
   assert.equal(createDraft().shared, "");
@@ -57,4 +57,13 @@ test("staged drafts tailor only when the agent sends a separate X version", () =
   const tailored = stagedDraft(StageDraftRequestSchema.parse({ text: "Long", x: "Short", providers: ["linkedin"] }));
   assert.deepEqual(tailored, { shared: "Long", x: "Short", linkedin: "Long", tailored: true, selection: { x: false, linkedin: true } });
   assert.equal(StageDraftRequestSchema.safeParse({ text: "Hi", providers: ["x", "x"] }).success, false);
+});
+
+test("X's composer link carries the exact post text", () => {
+  const text = " Fixed it & shipped #release 🎉\nhttps://example.com/a?b=1 ";
+  const url = new URL(xComposerUrl(text));
+  assert.equal(url.origin + url.pathname, "https://x.com/intent/post");
+  assert.equal(url.searchParams.get("text"), text.trim());
+  assert.equal(hasLink(text), true);
+  assert.equal(hasLink("no links here"), false);
 });

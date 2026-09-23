@@ -18,7 +18,7 @@ import {
   type Provider,
 } from "@/lib/domain";
 import { applyDeliveryResults, createDraft, DRAFT_KEY, DraftIdSchema, draftHasText, DraftSchema, type Draft } from "@/lib/draft";
-import { countPostCharacters, POST_LIMITS, postTextIsValid, previewSegments } from "@/lib/text";
+import { countPostCharacters, hasLink, POST_LIMITS, postTextIsValid, previewSegments, xComposerUrl } from "@/lib/text";
 
 const providers = ["x", "linkedin"] satisfies ReadonlyArray<Provider>;
 const ErrorResponseSchema = z.object({ error: z.string() });
@@ -304,6 +304,13 @@ export function Composer({ displayName }: { readonly displayName: string }) {
     setPublishState({ kind: "idle" });
   }
 
+  // The person finishes in X's composer, so deselect X here to keep the next Publish from posting it twice.
+  function handOffToX(): void {
+    setDraft((current) => ({ ...current, selection: { ...current.selection, x: false } }));
+    setPublishState({ kind: "idle" });
+    setNotice(message("Finish posting in the X tab. X is deselected here so it is not posted twice."));
+  }
+
   function startNewPost(): void {
     setDraft(createDraft());
     setPublishState({ kind: "idle" });
@@ -375,7 +382,7 @@ export function Composer({ displayName }: { readonly displayName: string }) {
           <h2 id="preview-heading" className="column-heading">Preview</h2>
           <div className="preview-stack">
             {selectedProviders.map((provider) => (
-              <FeedPreview key={provider} provider={provider} message={textFor(provider)} displayName={displayName} initials={initials} account={accountFor(connections, provider)} />
+              <FeedPreview key={provider} provider={provider} message={textFor(provider)} displayName={displayName} initials={initials} account={accountFor(connections, provider)} onPostOnX={handOffToX} disabled={busy} />
             ))}
             {selectedProviders.length === 0 && <div className="empty-preview">Choose a network to see its preview.</div>}
           </div>
@@ -500,7 +507,7 @@ function CharacterCount(props: { readonly provider: Provider; readonly value: st
   );
 }
 
-function FeedPreview(props: { readonly provider: Provider; readonly message: string; readonly displayName: string; readonly initials: string; readonly account: Account | null }) {
+function FeedPreview(props: { readonly provider: Provider; readonly message: string; readonly displayName: string; readonly initials: string; readonly account: Account | null; readonly onPostOnX: () => void; readonly disabled: boolean }) {
   const isX = props.provider === "x";
   const connected = props.account?.status === "connected" ? props.account : null;
   const identity = connected?.accountHandle ? `@${connected.accountHandle}` : isX ? "@yourhandle" : "Your LinkedIn profile";
@@ -516,7 +523,23 @@ function FeedPreview(props: { readonly provider: Provider; readonly message: str
         {segments.length === 0 ? <span className="preview-placeholder">Your post will appear here.</span> : segments.map((segment, index) => segment.kind === "entity" ? <span key={index} className="preview-entity">{segment.value}</span> : segment.value)}
       </p>
       <div className="engagement-line">{(isX ? ["Reply", "Repost", "Like", "Share"] : ["Like", "Comment", "Repost", "Send"]).map((label) => <span key={label}>{label}</span>)}</div>
+      {isX && <XComposerHandoff message={props.message} connected={connected !== null} onOpen={props.onPostOnX} disabled={props.disabled} />}
     </article>
+  );
+}
+
+function XComposerHandoff(props: { readonly message: string; readonly connected: boolean; readonly onOpen: () => void; readonly disabled: boolean }) {
+  const empty = props.message.trim().length === 0;
+  const note = props.connected && hasLink(props.message)
+    ? "Posts with links cost $0.20 through the X API. Posting on X.com is free."
+    : "Opens X's composer with this text. Free, and no developer app needed.";
+  return (
+    <div className="x-handoff">
+      <Button asChild variant="outline" size="sm" aria-disabled={empty || props.disabled}>
+        <a href={empty || props.disabled ? undefined : xComposerUrl(props.message)} target="_blank" rel="noreferrer" onClick={props.onOpen}>Post on X.com <ArrowUpRight /></a>
+      </Button>
+      <small>{note}</small>
+    </div>
   );
 }
 
@@ -601,7 +624,7 @@ function PublishHint(props: { readonly readiness: Readiness; readonly tailored: 
     case "accounts-unavailable":
       return <p><LockKeyhole /> {readiness.message} <button type="button" className="text-button" onClick={props.onRetryAccounts}>Retry</button></p>;
     case "not-connected":
-      return <p><LockKeyhole /> <a href="#accounts">Connect {listLabel(readiness.providers)}</a> to publish.</p>;
+      return <p><LockKeyhole /> <a href="#accounts">Connect {listLabel(readiness.providers)}</a> to publish{readiness.providers.includes("x") ? ", or use Post on X.com in the X preview" : ""}.</p>;
     case "ready":
       return <p><Check /> Ready to publish.</p>;
     default: {

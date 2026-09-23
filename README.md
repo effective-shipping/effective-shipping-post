@@ -24,15 +24,15 @@ Drafts save in your browser. Provider tokens stay encrypted in Cloudflare D1. Ea
 5. Open `http://localhost:5173` and sign in with your personal password.
 6. Connect X, LinkedIn, or both under **Accounts**. A network without app credentials shows its setup steps and the exact callback URL to register.
 
-You can edit drafts without provider credentials. Publishing requires a connected account. Press ⌘+Enter or Ctrl+Enter in the editor to publish. Running `setup:local` again preserves your existing secrets and applies only pending migrations.
+You can edit drafts without provider credentials. Publishing requires a connected account. To post on X without a developer app, choose **Post on X.com** in the X preview. It opens X's own composer with your text, costs nothing, and deselects X in Twofold so the post is not sent twice. Press ⌘+Enter or Ctrl+Enter in the editor to publish. Running `setup:local` again preserves your existing secrets and applies only pending migrations.
 
 ## Draft posts from your coding agent
 
-Twofold includes an MCP server and a `tweet` skill for Claude Code and Codex. When a session turns up something worth sharing, invoke the skill, optionally followed by an angle: `/tweet` in Claude Code, or `$tweet` in Codex. Codex has no custom slash commands, so `/tweet` is unrecognized there. The agent drafts a post from the session and stages it in Twofold. Twofold opens in your browser, already signed in, so you can edit and publish. Agents can stage drafts but cannot publish them.
+Twofold includes an MCP server and a `post` skill for Claude Code and Codex. When a session turns up something worth sharing, invoke the skill, optionally followed by an angle: `/post` in Claude Code, or `$post` in Codex. Codex has no custom slash commands, so `/post` is unrecognized there. The agent drafts a post from the session and stages it in Twofold. Twofold opens in your browser, already signed in, so you can edit and publish. Agents can stage drafts but cannot publish them.
 
 The draft link signs your browser in once and expires after 10 minutes. After that, it opens the draft in a signed-in browser and otherwise asks for your password.
 
-Other MCP clients work without the skill. Ask the agent to tweet or post about something, or use the server's `tweet` prompt. The drafting rules live in the `stage_post` tool description.
+Other MCP clients work without the skill. Ask the agent to tweet or post about something, or use the server's `post` prompt. The drafting rules live in the `stage_post` tool description.
 
 1. Complete [Run locally](#run-locally). `setup:local` also generates the `API_TOKEN` that the MCP server uses.
 2. Install the skill and register the MCP server for each agent CLI on your machine:
@@ -41,7 +41,7 @@ Other MCP clients work without the skill. Ask the agent to tweet or post about s
    npm run setup:agent
    ```
 
-3. Start a new agent session and run `/tweet` in Claude Code or `$tweet` in Codex.
+3. Start a new agent session and run `/post` in Claude Code or `$post` in Codex.
 
 If Twofold is not running, the MCP server starts it on `http://localhost:5173` and leaves it running for your review. Its log is `.wrangler/twofold-app.log`. To stop it, run `kill $(cat .wrangler/twofold-app.pid)`.
 

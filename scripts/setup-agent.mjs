@@ -1,4 +1,4 @@
-// Installs the /tweet skill and registers the Twofold MCP server for each agent CLI found on this machine.
+// Installs the /post skill and registers the Twofold MCP server for each agent CLI found on this machine.
 // Safe to run again: it skips anything already installed and never overwrites files it did not create.
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readlinkSync, symlinkSync } from "node:fs";
@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
-const skillSource = path.join(projectRoot, "skills/tweet");
+const skillSource = path.join(projectRoot, "skills/post");
 const serverCommand = ["node", path.join(projectRoot, "mcp/server.ts")];
 
 const harnesses = [
@@ -20,7 +20,7 @@ function run(command, args) {
 }
 
 function linkSkill(skillsDirectory) {
-  const target = path.join(skillsDirectory, "tweet");
+  const target = path.join(skillsDirectory, "post");
   if (existsSync(target) || isSymlink(target)) {
     if (isSymlink(target) && path.resolve(skillsDirectory, readlinkSync(target)) === skillSource) return "already linked";
     return `skipped: ${target} already exists and is not this project's skill`;
@@ -58,5 +58,5 @@ for (const harness of harnesses) {
 if (installed === 0) {
   console.info(`No supported agent CLI found. Register this MCP server manually: ${serverCommand.join(" ")}`);
 } else {
-  console.info("Start a new agent session, then run /tweet in Claude Code or $tweet in Codex. The MCP server starts Twofold on http://localhost:5173 when needed.");
+  console.info("Start a new agent session, then run /post in Claude Code or $post in Codex. The MCP server starts Twofold on http://localhost:5173 when needed.");
 }

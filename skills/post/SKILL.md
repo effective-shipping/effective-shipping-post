@@ -1,6 +1,6 @@
 ---
-name: tweet
-description: Draft a post for X and LinkedIn from what happened in this session, then open it in Twofold for the user to edit and publish. Use for /tweet (Claude Code), $tweet (Codex), or when the user asks to post, tweet, or share something from the current work.
+name: post
+description: Draft a post for X and LinkedIn from what happened in this session, then open it in Twofold for the user to edit and publish. Use for /post (Claude Code), $post (Codex), or when the user asks to post, tweet, or share something from the current work.
 argument-hint: "[angle or topic]"
 allowed-tools: mcp__twofold__stage_post
 ---

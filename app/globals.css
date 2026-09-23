@@ -149,6 +149,9 @@ h1, h2, p { margin-top: 0; }
 .preview-placeholder { color: var(--muted-foreground); }
 .x-preview .preview-entity { color: #1d9bf0; }
 .linkedin-preview .preview-entity { color: #0a66c2; font-weight: 600; }
+.x-handoff { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 12px; }
+.x-handoff small { flex: 1 1 180px; color: var(--muted-foreground); font-size: 0.74rem; line-height: 1.4; }
+.x-handoff a[aria-disabled="true"] { opacity: 0.5; pointer-events: none; }
 .engagement-line { display: flex; justify-content: space-between; border-top: 1px solid var(--border); padding-top: 12px; color: var(--muted-foreground); font-size: 0.72rem; }
 .empty-preview { display: grid; min-height: 160px; place-items: center; border: 1px dashed var(--border); border-radius: 16px; color: var(--muted-foreground); font-size: 0.9rem; }
 .connections-card { margin-top: 32px; }
