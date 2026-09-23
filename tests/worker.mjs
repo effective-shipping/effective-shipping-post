@@ -50,10 +50,11 @@ const worker = new Miniflare({
 });
 
 const jar = new Map();
-async function request(path, body) {
+async function request(path, body, { form } = {}) {
   const response = await worker.dispatchFetch(`http://twofold.test${path}`, {
     redirect: "manual",
     ...(body !== undefined ? { method: "POST", body: JSON.stringify(body) } : {}),
+    ...(form !== undefined ? { method: "POST", body: new URLSearchParams(form) } : {}),
     headers: {
       Cookie: [...jar.entries()].map(([key, value]) => `${key}=${value}`).join("; "),
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
@@ -76,7 +77,9 @@ async function publish() {
 try {
   const database = await worker.getD1Database("DB");
   await database.prepare(readFileSync("drizzle/0000_light_nebula.sql", "utf8")).run();
-  assert.equal((await request("/api/session", { password: "worker-test-password" })).status, 200);
+  assert.equal((await request("/api/session", undefined, { form: { password: "worker-test-password" } })).status, 303);
+  const unconnected = (await (await request("/api/connections")).json()).accounts;
+  assert.deepEqual(unconnected, [{ status: "disconnected", provider: "x" }, { status: "disconnected", provider: "linkedin" }]);
 
   const xStart = await request("/api/oauth/x");
   const linkedinStart = await request("/api/oauth/linkedin");
@@ -93,8 +96,9 @@ try {
     assert.equal(callback.status, 307);
     assert.ok(callback.headers.get("Location")?.includes("notice=connected"));
   }
-  const accounts = (await (await request("/api/connections")).json()).connections;
+  const accounts = (await (await request("/api/connections")).json()).accounts;
   assert.equal(accounts.length, 2);
+  assert.ok(accounts.every((account) => account.status === "connected"));
   assert.ok(accounts.every((account) => !JSON.stringify(account).includes("access")));
   const rows = (await database.prepare("SELECT access_token, refresh_token FROM connections").all()).results;
   assert.ok(rows.every((row) => row.access_token !== "x-access" && row.access_token !== "linkedin-access"));

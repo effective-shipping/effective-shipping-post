@@ -5,6 +5,7 @@ import { getAppUser } from "@/lib/auth";
 import { randomBase64Url, sealJson, sha256Base64Url } from "@/lib/crypto";
 import { ProviderSchema } from "@/lib/domain";
 import { authorizationUrl, providerIsConfigured } from "@/lib/providers";
+import { oauthCallbackUrl } from "@/lib/request";
 
 export async function GET(request: NextRequest, context: { params: Promise<{ provider: string }> }) {
   const user = await getAppUser();
@@ -17,7 +18,6 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
 
   const state = randomBase64Url();
   const codeVerifier = randomBase64Url(48);
-  const redirectUri = `${new URL(request.url).origin}/api/oauth/${provider}/callback`;
   const sealedState = await sealJson({
     provider,
     state,
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
 
   return NextResponse.redirect(authorizationUrl({
     provider,
-    redirectUri,
+    redirectUri: oauthCallbackUrl(request, provider),
     state,
     codeChallenge: await sha256Base64Url(codeVerifier),
   }));

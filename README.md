@@ -22,9 +22,9 @@ Drafts save in your browser. Provider tokens stay encrypted in Cloudflare D1. Ea
    ```
 
 5. Open `http://localhost:5173` and sign in with your personal password.
-6. Connect X, LinkedIn, or both from the account controls.
+6. Connect X, LinkedIn, or both under **Accounts**. A network without app credentials shows its setup steps and the exact callback URL to register.
 
-You can edit drafts without provider credentials. Publishing requires a connected account. Running `setup:local` again preserves your existing secrets and applies only pending migrations.
+You can edit drafts without provider credentials. Publishing requires a connected account. Press ⌘+Enter or Ctrl+Enter in the editor to publish. Running `setup:local` again preserves your existing secrets and applies only pending migrations.
 
 ## Configure X
 

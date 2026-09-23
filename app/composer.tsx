@@ -1,30 +1,30 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, Check, Feather, Link2, LoaderCircle, LockKeyhole, Send, Trash2, XCircle } from "lucide-react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { ArrowUpRight, Check, Copy, LoaderCircle, LockKeyhole, LogOut, PenLine, Send, Trash2, XCircle } from "lucide-react";
 import { z } from "zod";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  ConnectionSummarySchema,
+  AccountSchema,
   ProviderSchema,
   PublishResponseSchema,
-  type ConnectionSummary,
+  type Account,
   type DestinationResult,
   type Provider,
 } from "@/lib/domain";
 import { applyDeliveryResults, createDraft, DRAFT_KEY, DraftSchema, type Draft } from "@/lib/draft";
-import { countPostCharacters, POST_LIMITS, postTextIsValid } from "@/lib/text";
+import { countPostCharacters, POST_LIMITS, postTextIsValid, previewSegments } from "@/lib/text";
 
 const providers = ["x", "linkedin"] satisfies ReadonlyArray<Provider>;
 const ErrorResponseSchema = z.object({ error: z.string() });
 
-const ConnectionsResponseSchema = z.object({
-  connections: z.array(ConnectionSummarySchema),
+const AccountsResponseSchema = z.object({
+  accounts: z.array(AccountSchema),
 });
 
 const StageCrosspostSchema = z.object({
@@ -34,7 +34,7 @@ const StageCrosspostSchema = z.object({
 
 type ConnectionState =
   | { readonly kind: "loading" }
-  | { readonly kind: "ready"; readonly items: ReadonlyArray<ConnectionSummary> }
+  | { readonly kind: "ready"; readonly accounts: ReadonlyArray<Account> }
   | { readonly kind: "unavailable"; readonly message: string };
 
 type PublishState =
@@ -43,8 +43,45 @@ type PublishState =
   | { readonly kind: "complete"; readonly results: ReadonlyArray<DestinationResult> }
   | { readonly kind: "error"; readonly message: string };
 
+// The first reason the selected destinations cannot be published, in the order the user should fix them.
+type Readiness =
+  | { readonly kind: "no-destination" }
+  | { readonly kind: "empty"; readonly provider: Provider }
+  | { readonly kind: "over-limit"; readonly provider: Provider; readonly over: number }
+  | { readonly kind: "invalid"; readonly provider: Provider }
+  | { readonly kind: "checking-accounts" }
+  | { readonly kind: "accounts-unavailable"; readonly message: string }
+  | { readonly kind: "not-connected"; readonly providers: ReadonlyArray<Provider> }
+  | { readonly kind: "ready" };
+
+type SetupGuide = {
+  readonly portal: { readonly label: string; readonly href: string };
+  readonly steps: ReadonlyArray<string>;
+  readonly callbackStep: string;
+  readonly secrets: readonly [string, string];
+};
+
+const setupGuides = {
+  x: {
+    portal: { label: "X Developer Portal", href: "https://developer.x.com/en/portal/dashboard" },
+    steps: ["In User authentication settings, choose Read and write, and Web App."],
+    callbackStep: "Add this callback URL:",
+    secrets: ["X_CLIENT_ID", "X_CLIENT_SECRET"],
+  },
+  linkedin: {
+    portal: { label: "LinkedIn Developers", href: "https://www.linkedin.com/developers/apps" },
+    steps: ["Add the Sign In with LinkedIn using OpenID Connect and Share on LinkedIn products."],
+    callbackStep: "On the Auth tab, add this redirect URL:",
+    secrets: ["LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET"],
+  },
+} satisfies Record<Provider, SetupGuide>;
+
 function providerLabel(provider: Provider): string {
   return provider === "x" ? "X" : "LinkedIn";
+}
+
+function listLabel(items: ReadonlyArray<Provider>): string {
+  return items.map(providerLabel).join(" and ");
 }
 
 export function Composer({ displayName }: { readonly displayName: string }) {
@@ -62,18 +99,9 @@ export function Composer({ displayName }: { readonly displayName: string }) {
     () => providers.filter((provider) => draft.selection[provider]),
     [draft.selection],
   );
-  const connectedProviders = connections.kind === "ready"
-    ? new Set(connections.items.map((connection) => connection.provider))
-    : new Set<Provider>();
-  const allSelectedConnected = selectedProviders.every((provider) => connectedProviders.has(provider));
-  const xText = draft.tailored ? draft.x : draft.shared;
-  const linkedInText = draft.tailored ? draft.linkedin : draft.shared;
-  const hasLimitError =
-    (draft.selection.x && xText.trim().length > 0 && !postTextIsValid("x", xText)) ||
-    (draft.selection.linkedin && linkedInText.trim().length > 0 && !postTextIsValid("linkedin", linkedInText));
-  const allSelectedHaveText = selectedProviders.every((provider) =>
-    (provider === "x" ? xText : linkedInText).trim().length > 0,
-  );
+  const textFor = (provider: Provider): string => draft.tailored ? draft[provider] : draft.shared;
+  const readiness = publishReadiness({ selectedProviders, textFor, connections });
+  const canPublish = draftLoaded && readiness.kind === "ready" && !busy && disconnecting === null;
   const initials = displayName.split(/\s+/u).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "ME";
 
   useEffect(() => {
@@ -164,10 +192,10 @@ export function Composer({ displayName }: { readonly displayName: string }) {
       const response = await fetch("/api/connections", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
       const body: unknown = await response.json().catch(() => null);
       if (response.status === 401) { window.location.assign("/login"); return; }
-      if (!response.ok) throw new Error("Connections are unavailable. Try checking again.");
-      setConnections({ kind: "ready", items: ConnectionsResponseSchema.parse(body).connections });
+      if (!response.ok) throw new Error("Accounts are unavailable. Try checking again.");
+      setConnections({ kind: "ready", accounts: AccountsResponseSchema.parse(body).accounts });
     } catch (error) {
-      setConnections({ kind: "unavailable", message: error instanceof Error ? error.message : "Connections are unavailable." });
+      setConnections({ kind: "unavailable", message: error instanceof Error ? error.message : "Accounts are unavailable." });
     }
   }
 
@@ -195,15 +223,12 @@ export function Composer({ displayName }: { readonly displayName: string }) {
   }
 
   async function publish(): Promise<void> {
-    if (publishing.current || !draftLoaded || !allSelectedHaveText || !allSelectedConnected || hasLimitError || selectedProviders.length === 0) return;
+    if (publishing.current || !canPublish) return;
     publishing.current = true;
     const previousResults = publishState.kind === "complete" ? publishState.results : [];
     setPublishState({ kind: "publishing" });
     try {
-      const destinations = selectedProviders.map((provider) => ({
-        provider,
-        text: provider === "x" ? xText : linkedInText,
-      }));
+      const destinations = selectedProviders.map((provider) => ({ provider, text: textFor(provider) }));
       const response = await fetch("/api/posts", {
         signal: AbortSignal.timeout(45_000),
         method: "POST",
@@ -251,26 +276,29 @@ export function Composer({ displayName }: { readonly displayName: string }) {
     setPublishState({ kind: "idle" });
   }
 
+  function startNewPost(): void {
+    setDraft(createDraft());
+    setPublishState({ kind: "idle" });
+  }
+
+  const editorProps = { onSubmit: () => void publish(), onClear: clearDraft } as const;
+
   return (
     <div className="app-shell">
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="Twofold home"><span className="brand-mark">2F</span><span>Twofold</span></a>
-        <div className="topbar-actions">
-          <Badge variant="outline" className="privacy-badge"><LockKeyhole aria-hidden="true" /> Private workspace</Badge>
-          <a className="profile-button" href="/logout" title="Sign out">
-            <Avatar size="sm"><AvatarFallback>{initials}</AvatarFallback></Avatar>
-            <span className="profile-name">{displayName}</span>
-          </a>
-        </div>
+        <span className="brand"><span className="brand-mark">2F</span><span>Twofold</span></span>
+        <form method="post" action="/logout">
+          <Button type="submit" variant="ghost" size="sm" className="sign-out"><LogOut /> Sign out</Button>
+        </form>
       </header>
 
       {notice && <div className="notice-banner" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice(null)} aria-label="Dismiss notice">×</button></div>}
 
-      <main id="top" className="workspace">
+      <main className="workspace">
         <section className="composer-column" aria-labelledby="composer-heading">
           <div className="section-heading">
-            <div><p className="eyebrow">New post</p><h1 id="composer-heading">Write once. Make it fit twice.</h1></div>
-            <Badge className="draft-badge" variant="secondary" role="status">{!draftLoaded ? "Loading draft" : draftSaved ? "Draft saved on this device" : "Draft saving unavailable. Keep a copy."}</Badge>
+            <h1 id="composer-heading"><PenLine aria-hidden="true" /> New post</h1>
+            <span className="draft-status" role="status">{!draftLoaded ? "Loading draft…" : draftSaved ? "Saved on this device" : "Not saved. Keep a copy."}</span>
           </div>
 
           <div className="paper-card composer-card">
@@ -289,50 +317,43 @@ export function Composer({ displayName }: { readonly displayName: string }) {
               </div>
 
               {!draft.tailored ? (
-                <Editor label="Post text" value={draft.shared} provider={draft.selection.x ? "x" : "linkedin"} onChange={updateShared} onClear={clearDraft} />
+                <Editor label="Post text" value={draft.shared} counters={selectedProviders.length ? selectedProviders : providers} onChange={updateShared} {...editorProps} />
               ) : (
                 <div className="tailored-editors">
-                  <Editor label="X version" value={draft.x} provider="x" onChange={(value) => updateProvider("x", value)} onClear={clearDraft} />
-                  <Editor label="LinkedIn version" value={draft.linkedin} provider="linkedin" onChange={(value) => updateProvider("linkedin", value)} />
+                  <Editor label="X version" value={draft.x} counters={["x"]} onChange={(value) => updateProvider("x", value)} {...editorProps} />
+                  <Editor label="LinkedIn version" value={draft.linkedin} counters={["linkedin"]} onChange={(value) => updateProvider("linkedin", value)} onSubmit={editorProps.onSubmit} />
                 </div>
               )}
 
               <label className="tailor-row">
-                <span><strong>Tailor each version</strong><small>Use a short X post and a roomier LinkedIn version.</small></span>
+                <span><strong>Tailor each version</strong><small>Write a short X post and a longer LinkedIn version.</small></span>
                 <Switch aria-label="Tailor each version" checked={draft.tailored} onCheckedChange={toggleTailored} />
               </label>
 
               <div className="publish-row">
-                <PublishHint connections={connections} selectedProviders={selectedProviders} hasLimitError={hasLimitError} hasText={allSelectedHaveText} />
-                <Button
-                  type="button"
-                  size="lg"
-                  className="publish-button"
-                  disabled={!draftLoaded || !allSelectedHaveText || selectedProviders.length === 0 || hasLimitError || !allSelectedConnected || busy || disconnecting !== null}
-                  onClick={() => void publish()}
-                >
-                  {publishState.kind === "publishing" ? <LoaderCircle className="spin" /> : <Send />}
-                  {publishState.kind === "publishing" ? "Publishing" : `Publish to ${selectedProviders.length}`}
+                <PublishHint readiness={readiness} tailored={draft.tailored} onRetryAccounts={() => void loadConnections()} />
+                <Button type="button" size="lg" className="publish-button" disabled={!canPublish} onClick={() => void publish()}>
+                  {busy ? <LoaderCircle className="spin" /> : <Send />}
+                  {busy ? "Publishing…" : publishLabel(selectedProviders)}
+                  {!busy && <Kbd className="publish-shortcut">⌘ ↵</Kbd>}
                 </Button>
               </div>
             </fieldset>
-            <PublishResult state={publishState} />
+            <PublishResult state={publishState} onStartNewPost={startNewPost} />
           </div>
-
-          <aside className="setup-note"><Feather aria-hidden="true" /><div><strong>Your draft stays on this device.</strong><p>Provider tokens are encrypted on the server. Posting starts when you choose Publish.</p></div></aside>
         </section>
 
         <aside className="preview-column" aria-labelledby="preview-heading">
-          <div className="preview-title-row"><div><p className="eyebrow">Live preview</p><h2 id="preview-heading">Both feeds</h2></div><span className="live-pill"><span /> Synced</span></div>
+          <h2 id="preview-heading" className="column-heading">Preview</h2>
           <div className="preview-stack">
-            {draft.selection.x && <FeedPreview provider="x" message={xText} displayName={displayName} initials={initials} connection={connectionFor(connections, "x")} />}
-            {draft.selection.linkedin && <FeedPreview provider="linkedin" message={linkedInText} displayName={displayName} initials={initials} connection={connectionFor(connections, "linkedin")} />}
-            {selectedProviders.length === 0 && <div className="empty-preview">Select a network to see its preview.</div>}
+            {selectedProviders.map((provider) => (
+              <FeedPreview key={provider} provider={provider} message={textFor(provider)} displayName={displayName} initials={initials} account={accountFor(connections, provider)} />
+            ))}
+            {selectedProviders.length === 0 && <div className="empty-preview">Choose a network to see its preview.</div>}
           </div>
-          <section className="connections-card" aria-labelledby="connections-heading">
-            <div><p className="eyebrow">Accounts</p><h2 id="connections-heading">Connect once</h2></div>
-            {connections.kind === "unavailable" && <Button type="button" variant="outline" size="sm" onClick={() => void loadConnections()}>Check connections again</Button>}
-            {providers.map((provider) => <ConnectionRow key={provider} provider={provider} state={connections} onDisconnect={disconnect} disabled={busy || disconnecting !== null || connections.kind === "loading"} disconnecting={disconnecting === provider} />)}
+          <section id="accounts" className="connections-card" aria-labelledby="connections-heading">
+            <h2 id="connections-heading" className="column-heading">Accounts</h2>
+            {providers.map((provider) => <AccountRow key={provider} provider={provider} state={connections} onDisconnect={disconnect} disabled={busy || disconnecting !== null} disconnecting={disconnecting === provider} />)}
           </section>
         </aside>
       </main>
@@ -340,32 +361,89 @@ export function Composer({ displayName }: { readonly displayName: string }) {
   );
 }
 
-function Editor(props: { readonly label: string; readonly value: string; readonly provider: Provider; readonly onChange: (value: string) => void; readonly onClear?: () => void }) {
+function publishReadiness(args: {
+  readonly selectedProviders: ReadonlyArray<Provider>;
+  readonly textFor: (provider: Provider) => string;
+  readonly connections: ConnectionState;
+}): Readiness {
+  if (args.selectedProviders.length === 0) return { kind: "no-destination" };
+  for (const provider of args.selectedProviders) {
+    const text = args.textFor(provider);
+    if (!text.trim()) return { kind: "empty", provider };
+    if (!postTextIsValid(provider, text)) {
+      const over = countPostCharacters(provider, text) - POST_LIMITS[provider];
+      return over > 0 ? { kind: "over-limit", provider, over } : { kind: "invalid", provider };
+    }
+  }
+  if (args.connections.kind === "loading") return { kind: "checking-accounts" };
+  if (args.connections.kind === "unavailable") return { kind: "accounts-unavailable", message: args.connections.message };
+  const state = args.connections;
+  const missing = args.selectedProviders.filter((provider) => accountFor(state, provider)?.status !== "connected");
+  if (missing.length) return { kind: "not-connected", providers: missing };
+  return { kind: "ready" };
+}
+
+function publishLabel(selected: ReadonlyArray<Provider>): string {
+  if (selected.length === 1) return `Publish to ${providerLabel(selected[0])}`;
+  return selected.length === 2 ? "Publish to both" : "Publish";
+}
+
+function Editor(props: {
+  readonly label: string;
+  readonly value: string;
+  readonly counters: ReadonlyArray<Provider>;
+  readonly onChange: (value: string) => void;
+  readonly onSubmit: () => void;
+  readonly onClear?: () => void;
+}) {
   const id = useId();
-  const over = props.value.trim().length > 0 && !postTextIsValid(props.provider, props.value);
+  const over = props.value.trim().length > 0 && props.counters.some((provider) => !postTextIsValid(provider, props.value));
+
+  function submitOnShortcut(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
+    event.preventDefault();
+    props.onSubmit();
+  }
+
   return (
     <div className="writing-area">
       <label className="editor-label" htmlFor={id}>{props.label}</label>
-      <Textarea id={id} aria-invalid={over} aria-describedby={`${id}-count`} className="post-textarea" value={props.value} onChange={(event) => props.onChange(event.target.value)} placeholder="What do you want to share?" />
+      <Textarea id={id} aria-invalid={over} aria-describedby={`${id}-count`} className="post-textarea" value={props.value} onChange={(event) => props.onChange(event.target.value)} onKeyDown={submitOnShortcut} placeholder="What do you want to share?" />
       <div className="writing-toolbar">
-        <span className="link-note"><Link2 /> Links stay clickable on both networks</span>
-        <div className="editor-meta">
-          {props.onClear && <Button type="button" variant="ghost" size="sm" onClick={props.onClear}><Trash2 /> Clear</Button>}
-          <span id={`${id}-count`} className={over ? "character-count is-over" : "character-count"}>{countPostCharacters(props.provider, props.value)} / {POST_LIMITS[props.provider]}</span>
-        </div>
+        <span id={`${id}-count`} className="character-counts">
+          {props.counters.map((provider) => <CharacterCount key={provider} provider={provider} value={props.value} labelled={props.counters.length > 1} />)}
+        </span>
+        {props.onClear && <Button type="button" variant="ghost" size="sm" onClick={props.onClear} disabled={!props.value}><Trash2 /> Clear</Button>}
       </div>
     </div>
   );
 }
 
-function FeedPreview(props: { readonly provider: Provider; readonly message: string; readonly displayName: string; readonly initials: string; readonly connection: ConnectionSummary | null }) {
+function CharacterCount(props: { readonly provider: Provider; readonly value: string; readonly labelled: boolean }) {
+  const over = props.value.trim().length > 0 && !postTextIsValid(props.provider, props.value);
+  return (
+    <span className={over ? "character-count is-over" : "character-count"}>
+      {props.labelled && <span className="count-label">{providerLabel(props.provider)}</span>}
+      {countPostCharacters(props.provider, props.value)} / {POST_LIMITS[props.provider]}
+    </span>
+  );
+}
+
+function FeedPreview(props: { readonly provider: Provider; readonly message: string; readonly displayName: string; readonly initials: string; readonly account: Account | null }) {
   const isX = props.provider === "x";
-  const identity = props.connection?.accountHandle ? `@${props.connection.accountHandle}` : isX ? "@yourhandle" : "Your LinkedIn profile";
+  const connected = props.account?.status === "connected" ? props.account : null;
+  const identity = connected?.accountHandle ? `@${connected.accountHandle}` : isX ? "@yourhandle" : "Your LinkedIn profile";
+  const segments = previewSegments(props.provider, props.message);
   return (
     <article className={`feed-card ${isX ? "x-preview" : "linkedin-preview"}`} aria-label={`${providerLabel(props.provider)} post preview`}>
-      <div className="feed-card-topline"><span className="network-label"><NetworkIcon provider={props.provider} /> Preview</span><span>{countPostCharacters(props.provider, props.message)} / {POST_LIMITS[props.provider]}</span></div>
-      <div className="post-head"><Avatar><AvatarFallback>{props.initials}</AvatarFallback></Avatar><div><strong>{props.connection?.accountName ?? props.displayName}</strong><span>{identity} · now</span></div></div>
-      <p className="preview-copy">{props.message || "Your post will appear here."}</p>
+      <div className="post-head">
+        <Avatar><AvatarFallback>{props.initials}</AvatarFallback></Avatar>
+        <div><strong>{connected?.accountName ?? props.displayName}</strong><span>{identity} · now</span></div>
+        <NetworkIcon provider={props.provider} />
+      </div>
+      <p className="preview-copy">
+        {segments.length === 0 ? <span className="preview-placeholder">Your post will appear here.</span> : segments.map((segment, index) => segment.kind === "entity" ? <span key={index} className="preview-entity">{segment.value}</span> : segment.value)}
+      </p>
       <div className="engagement-line">{(isX ? ["Reply", "Repost", "Like", "Share"] : ["Like", "Comment", "Repost", "Send"]).map((label) => <span key={label}>{label}</span>)}</div>
     </article>
   );
@@ -375,46 +453,105 @@ function NetworkIcon({ provider }: { readonly provider: Provider }) {
   return <span className={provider === "x" ? "network-icon x-icon" : "network-icon linkedin-icon"} aria-hidden="true">{provider === "x" ? "X" : "in"}</span>;
 }
 
-function connectionFor(state: ConnectionState, provider: Provider): ConnectionSummary | null {
-  return state.kind === "ready" ? state.items.find((item) => item.provider === provider) ?? null : null;
+function accountFor(state: ConnectionState, provider: Provider): Account | null {
+  return state.kind === "ready" ? state.accounts.find((account) => account.provider === provider) ?? null : null;
 }
 
-function ConnectionRow(props: { readonly provider: Provider; readonly state: ConnectionState; readonly onDisconnect: (provider: Provider) => Promise<void>; readonly disabled: boolean; readonly disconnecting: boolean }) {
-  const connection = connectionFor(props.state, props.provider);
+function AccountRow(props: { readonly provider: Provider; readonly state: ConnectionState; readonly onDisconnect: (provider: Provider) => Promise<void>; readonly disabled: boolean; readonly disconnecting: boolean }) {
+  const account = accountFor(props.state, props.provider);
+  const label = providerLabel(props.provider);
+  const status = props.state.kind === "loading" ? "Checking…"
+    : props.state.kind === "unavailable" ? "Unavailable"
+    : account?.status === "connected" ? account.accountHandle ? `@${account.accountHandle}` : account.accountName
+    : account?.status === "unconfigured" ? "Needs app credentials"
+    : "Not connected";
   return (
-    <div className="connection-row">
-      <NetworkIcon provider={props.provider} />
-      <div><strong>{providerLabel(props.provider)}</strong><span>{connection ? connection.accountHandle ? `@${connection.accountHandle}` : connection.accountName : props.state.kind === "loading" ? "Checking connection" : "Not connected"}</span></div>
-      {connection ? (
-        <Button type="button" size="sm" variant="ghost" disabled={props.disabled} onClick={() => void props.onDisconnect(props.provider)}>{props.disconnecting ? "Disconnecting" : "Disconnect"}</Button>
-      ) : (
-        <Button asChild size="sm" variant="outline" disabled={props.disabled}><a href={props.disabled ? undefined : `/api/oauth/${props.provider}`}>Connect <ArrowUpRight /></a></Button>
-      )}
+    <div className="account">
+      <div className="connection-row">
+        <NetworkIcon provider={props.provider} />
+        <div className="connection-name"><strong>{label}</strong><span>{status}</span></div>
+        {account?.status === "connected" && (
+          <Button type="button" size="sm" variant="ghost" disabled={props.disabled} onClick={() => void props.onDisconnect(props.provider)}>{props.disconnecting ? "Disconnecting…" : "Disconnect"}</Button>
+        )}
+        {account?.status === "disconnected" && (
+          <Button asChild size="sm" variant="outline"><a href={`/api/oauth/${props.provider}`}>Connect <ArrowUpRight /></a></Button>
+        )}
+      </div>
+      {account?.status === "unconfigured" && <SetupSteps guide={setupGuides[props.provider]} callbackUrl={account.callbackUrl} />}
     </div>
   );
 }
 
-function PublishHint(props: { readonly connections: ConnectionState; readonly selectedProviders: ReadonlyArray<Provider>; readonly hasLimitError: boolean; readonly hasText: boolean }) {
-  if (props.selectedProviders.length === 0) return <p>Select a network for your next post.</p>;
-  if (props.hasLimitError) return <p className="error-hint"><XCircle /> One version is invalid or over its character limit.</p>;
-  if (!props.hasText) return <p>Write a post for each selected network.</p>;
-  if (props.connections.kind === "loading") return <p>Checking your accounts.</p>;
-  if (props.connections.kind === "unavailable") return <p><LockKeyhole /> {props.connections.message}</p>;
-  const missing = props.selectedProviders.filter((provider) => !connectionFor(props.connections, provider));
-  if (missing.length) return <p><LockKeyhole /> Connect {missing.map(providerLabel).join(" and ")} to publish.</p>;
-  return <p><Check /> Ready to publish now.</p>;
+function SetupSteps({ guide, callbackUrl }: { readonly guide: SetupGuide; readonly callbackUrl: string }) {
+  return (
+    <ol className="setup-steps">
+      <li>Create an app in <a href={guide.portal.href} target="_blank" rel="noreferrer">{guide.portal.label} <ArrowUpRight /></a></li>
+      {guide.steps.map((step) => <li key={step}>{step}</li>)}
+      <li>{guide.callbackStep}<CopyField value={callbackUrl} /></li>
+      <li>Set <code>{guide.secrets[0]}</code> and <code>{guide.secrets[1]}</code> in <code>.env.local</code> or as Worker secrets, then restart.</li>
+    </ol>
+  );
 }
 
-function PublishResult({ state }: { readonly state: PublishState }) {
+function CopyField({ value }: { readonly value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access can be denied; the value stays selectable.
+    }
+  }
+
+  return (
+    <span className="copy-field">
+      <code>{value.split(/(?<=\/)/u).map((part, index) => <Fragment key={index}>{part}<wbr /></Fragment>)}</code>
+      <Button type="button" size="icon-xs" variant="ghost" onClick={() => void copy()} aria-label="Copy callback URL">{copied ? <Check /> : <Copy />}</Button>
+    </span>
+  );
+}
+
+function PublishHint(props: { readonly readiness: Readiness; readonly tailored: boolean; readonly onRetryAccounts: () => void }) {
+  const readiness = props.readiness;
+  switch (readiness.kind) {
+    case "no-destination":
+      return <p>Choose X, LinkedIn, or both.</p>;
+    case "empty":
+      return <p>{props.tailored ? `Write the ${providerLabel(readiness.provider)} version.` : "Write something to publish."}</p>;
+    case "over-limit":
+      return <p className="error-hint"><XCircle /> {props.tailored ? `The ${providerLabel(readiness.provider)} version is ${readiness.over} characters over the limit.` : `${readiness.over} characters over the ${providerLabel(readiness.provider)} limit. Shorten it or tailor each version.`}</p>;
+    case "invalid":
+      return <p className="error-hint"><XCircle /> {providerLabel(readiness.provider)} does not accept some characters in this text.</p>;
+    case "checking-accounts":
+      return <p>Checking your accounts…</p>;
+    case "accounts-unavailable":
+      return <p><LockKeyhole /> {readiness.message} <button type="button" className="text-button" onClick={props.onRetryAccounts}>Retry</button></p>;
+    case "not-connected":
+      return <p><LockKeyhole /> <a href="#accounts">Connect {listLabel(readiness.providers)}</a> to publish.</p>;
+    case "ready":
+      return <p><Check /> Ready to publish.</p>;
+    default: {
+      const exhaustive: never = readiness;
+      return exhaustive;
+    }
+  }
+}
+
+function PublishResult({ state, onStartNewPost }: { readonly state: PublishState; readonly onStartNewPost: () => void }) {
   if (state.kind === "idle" || state.kind === "publishing") return null;
   if (state.kind === "error") return <div className="result-panel is-error" role="alert">{state.message}</div>;
+  const done = state.results.every((result) => result.kind !== "failed");
   return (
     <output className="result-panel" aria-live="polite">
       {state.results.map((result) => result.kind === "published" ? (
-        <a key={result.provider} href={result.postUrl} target="_blank" rel="noreferrer"><Check /> {providerLabel(result.provider)} published <ArrowUpRight /></a>
+        <a key={result.provider} href={result.postUrl} target="_blank" rel="noreferrer"><Check /> Published to {providerLabel(result.provider)}. View post <ArrowUpRight /></a>
       ) : (
         <span key={result.provider} className="failed-result"><XCircle /> {providerLabel(result.provider)}: {result.message}{result.kind === "failed" && result.reconnect && <a href={`/api/oauth/${result.provider}`}>Reconnect</a>}</span>
       ))}
+      {done && <Button type="button" variant="outline" size="sm" className="new-post-button" onClick={onStartNewPost}><PenLine /> Start a new post</Button>}
     </output>
   );
 }

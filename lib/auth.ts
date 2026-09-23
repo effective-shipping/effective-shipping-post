@@ -17,6 +17,9 @@ const SessionSchema = z.object({
 
 export type AppUser = z.infer<typeof SessionSchema>;
 
+export const LoginErrorSchema = z.enum(["password", "unconfigured"]);
+export type LoginError = z.infer<typeof LoginErrorSchema>;
+
 export async function getAppUser(): Promise<AppUser | null> {
   const sealedSession = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!sealedSession) return null;

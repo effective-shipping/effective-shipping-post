@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { applyDeliveryResults, createDraft, DraftSchema } from "../lib/draft";
-import { countPostCharacters, linkedInPlainText } from "../lib/text";
+import { countPostCharacters, linkedInPlainText, previewSegments } from "../lib/text";
 
 test("new drafts contain no sample copy and retain the entire message", () => {
   assert.equal(createDraft().shared, "");
@@ -40,4 +40,13 @@ test("LinkedIn sends punctuation as literal text", () => {
   assert.equal(linkedInPlainText("* shipped [v1] (today) #release @you"), "\\* shipped \\[v1\\] \\(today\\) \\#release \\@you");
   assert.equal(linkedInPlainText("https://example.com/path\nnext line"), "https://example.com/path\nnext line");
   assert.equal(linkedInPlainText("\\"), "\\\\");
+});
+
+test("previews mark what each network links", () => {
+  const text = " 😀 thanks @you #ship https://example.com/a ";
+  const entities = (provider: "x" | "linkedin") => previewSegments(provider, text).filter((segment) => segment.kind === "entity").map((segment) => segment.value);
+  assert.deepEqual(entities("x"), ["@you", "#ship", "https://example.com/a"]);
+  assert.deepEqual(entities("linkedin"), ["https://example.com/a"]);
+  assert.equal(previewSegments("x", text).map((segment) => segment.value).join(""), text.trim());
+  assert.deepEqual(previewSegments("linkedin", "  "), []);
 });
