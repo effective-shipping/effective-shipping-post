@@ -17,11 +17,13 @@ import {
   type DestinationResult,
   type Provider,
 } from "@/lib/domain";
-import { applyDeliveryResults, createDraft, DRAFT_KEY, DraftSchema, type Draft } from "@/lib/draft";
+import { applyDeliveryResults, createDraft, DRAFT_KEY, DraftIdSchema, draftHasText, DraftSchema, type Draft } from "@/lib/draft";
 import { countPostCharacters, POST_LIMITS, postTextIsValid, previewSegments } from "@/lib/text";
 
 const providers = ["x", "linkedin"] satisfies ReadonlyArray<Provider>;
 const ErrorResponseSchema = z.object({ error: z.string() });
+
+const StagedDraftResponseSchema = z.object({ draft: DraftSchema });
 
 const AccountsResponseSchema = z.object({
   accounts: z.array(AccountSchema),
@@ -42,6 +44,20 @@ type PublishState =
   | { readonly kind: "publishing" }
   | { readonly kind: "complete"; readonly results: ReadonlyArray<DestinationResult> }
   | { readonly kind: "error"; readonly message: string };
+
+type Notice =
+  | { readonly kind: "message"; readonly text: string }
+  | { readonly kind: "staged"; readonly previous: Draft | null };
+
+type StoredDraft =
+  | { readonly kind: "found"; readonly draft: Draft }
+  | { readonly kind: "none" }
+  | { readonly kind: "unreadable" };
+
+type StagedDraft =
+  | { readonly kind: "found"; readonly draft: Draft }
+  | { readonly kind: "missing" }
+  | { readonly kind: "failed" };
 
 // The first reason the selected destinations cannot be published, in the order the user should fix them.
 type Readiness =
@@ -90,7 +106,7 @@ export function Composer({ displayName }: { readonly displayName: string }) {
   const [draftSaved, setDraftSaved] = useState(false);
   const [connections, setConnections] = useState<ConnectionState>({ kind: "loading" });
   const [publishState, setPublishState] = useState<PublishState>({ kind: "idle" });
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [disconnecting, setDisconnecting] = useState<Provider | null>(null);
   const publishing = useRef(false);
   const busy = publishState.kind === "publishing";
@@ -106,20 +122,26 @@ export function Composer({ displayName }: { readonly displayName: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    queueMicrotask(() => {
+    const stagedId = DraftIdSchema.safeParse(new URLSearchParams(window.location.search).get("draft"));
+    if (stagedId.success) window.history.replaceState({}, "", window.location.pathname);
+    void (async () => {
+      const stored = readStoredDraft();
+      const staged = stagedId.success ? await fetchStagedDraft(stagedId.data) : null;
       if (cancelled) return;
-      try {
-        const stored = window.localStorage.getItem(DRAFT_KEY);
-        if (stored) {
-          const parsed = DraftSchema.safeParse(JSON.parse(stored));
-          if (parsed.success) setDraft(parsed.data);
-          else window.localStorage.removeItem(DRAFT_KEY);
-        }
-      } catch {
-        setNotice("This browser could not restore your draft. Keep a copy before leaving.");
+      const current = stored.kind === "found" ? stored.draft : null;
+      if (staged?.kind === "found") {
+        // Keep an unpublished draft recoverable when the staged one replaces it.
+        const replaced = current && draftHasText(current) && JSON.stringify(current) !== JSON.stringify(staged.draft);
+        setDraft(staged.draft);
+        setNotice({ kind: "staged", previous: replaced ? current : null });
+      } else {
+        if (current) setDraft(current);
+        if (staged?.kind === "missing") setNotice(message("That staged draft is no longer available."));
+        if (staged?.kind === "failed") setNotice(message("Twofold could not load the staged draft. Open the link again."));
+        if (stored.kind === "unreadable") setNotice(message("This browser could not restore your draft. Keep a copy before leaving."));
       }
       setDraftLoaded(true);
-    });
+    })();
     return () => { cancelled = true; };
   }, []);
 
@@ -142,11 +164,11 @@ export function Composer({ displayName }: { readonly displayName: string }) {
     const provider = ProviderSchema.safeParse(parameters.get("provider"));
     queueMicrotask(() => {
       if (noticeCode === "connected" && provider.success) {
-        setNotice(`${providerLabel(provider.data)} is connected.`);
+        setNotice(message(`${providerLabel(provider.data)} is connected.`));
       } else if (noticeCode === "configure" && provider.success) {
-        setNotice(`Add your ${providerLabel(provider.data)} app credentials before you connect.`);
+        setNotice(message(`Add your ${providerLabel(provider.data)} app credentials before you connect.`));
       } else if (noticeCode === "oauth-failed") {
-        setNotice("The account connection did not finish. Check the callback URL and try again.");
+        setNotice(message("The account connection did not finish. Check the callback URL and try again."));
       }
     });
     if (noticeCode) window.history.replaceState({}, "", window.location.pathname);
@@ -263,9 +285,9 @@ export function Composer({ displayName }: { readonly displayName: string }) {
       const response = await fetch(`/api/connections?provider=${provider}`, { method: "DELETE", signal: AbortSignal.timeout(15_000) });
       if (!response.ok) throw new Error("The account could not be disconnected. Try again.");
       await loadConnections();
-      setNotice(`${providerLabel(provider)} is disconnected.`);
+      setNotice(message(`${providerLabel(provider)} is disconnected.`));
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "The account could not be disconnected. Try again.");
+      setNotice(message(error instanceof Error ? error.message : "The account could not be disconnected. Try again."));
     } finally {
       setDisconnecting(null);
     }
@@ -273,6 +295,12 @@ export function Composer({ displayName }: { readonly displayName: string }) {
 
   function clearDraft(): void {
     setDraft((current) => ({ ...current, shared: "", x: "", linkedin: "" }));
+    setPublishState({ kind: "idle" });
+  }
+
+  function restoreDraft(previous: Draft): void {
+    setDraft(previous);
+    setNotice(null);
     setPublishState({ kind: "idle" });
   }
 
@@ -292,7 +320,7 @@ export function Composer({ displayName }: { readonly displayName: string }) {
         </form>
       </header>
 
-      {notice && <div className="notice-banner" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice(null)} aria-label="Dismiss notice">×</button></div>}
+      {notice && <NoticeBanner notice={notice} onDismiss={() => setNotice(null)} onRestore={restoreDraft} />}
 
       <main className="workspace">
         <section className="composer-column" aria-labelledby="composer-heading">
@@ -357,6 +385,49 @@ export function Composer({ displayName }: { readonly displayName: string }) {
           </section>
         </aside>
       </main>
+    </div>
+  );
+}
+
+function message(text: string): Notice {
+  return { kind: "message", text };
+}
+
+function readStoredDraft(): StoredDraft {
+  try {
+    const stored = window.localStorage.getItem(DRAFT_KEY);
+    if (!stored) return { kind: "none" };
+    const parsed = DraftSchema.safeParse(JSON.parse(stored));
+    if (parsed.success) return { kind: "found", draft: parsed.data };
+    window.localStorage.removeItem(DRAFT_KEY);
+    return { kind: "none" };
+  } catch {
+    return { kind: "unreadable" };
+  }
+}
+
+async function fetchStagedDraft(id: string): Promise<StagedDraft> {
+  try {
+    const response = await fetch(`/api/drafts/${id}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+    if (response.status === 404) return { kind: "missing" };
+    if (!response.ok) return { kind: "failed" };
+    return { kind: "found", draft: StagedDraftResponseSchema.parse(await response.json()).draft };
+  } catch {
+    return { kind: "failed" };
+  }
+}
+
+function NoticeBanner(props: { readonly notice: Notice; readonly onDismiss: () => void; readonly onRestore: (previous: Draft) => void }) {
+  const notice = props.notice;
+  return (
+    <div className="notice-banner" role="status">
+      {notice.kind === "message" ? <span>{notice.text}</span> : (
+        <span>
+          Your agent staged this draft. Nothing is published until you choose Publish.
+          {notice.previous && <button type="button" className="text-button" onClick={() => notice.previous && props.onRestore(notice.previous)}>Restore previous draft</button>}
+        </span>
+      )}
+      <button type="button" onClick={props.onDismiss} aria-label="Dismiss notice">×</button>
     </div>
   );
 }

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.18.0"
   },
   "scripts": {
     "install:ci": "node scripts/install-ci.mjs",
@@ -17,6 +17,8 @@
     "test:smoke": "node tests/smoke.mjs",
     "test:worker": "node tests/worker.mjs",
     "setup:local": "node scripts/setup-local.mjs && npm run db:migrate:local",
+    "setup:agent": "node scripts/setup-agent.mjs",
+    "mcp": "node mcp/server.ts",
     "db:migrate:local": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 migrations apply DB --local --config wrangler.local.jsonc --persist-to .wrangler/state",
     "db:generate": "drizzle-kit generate",
     "db:migrate:cloudflare": "wrangler d1 migrations apply twofold-db --remote --config wrangler.direct.jsonc"
@@ -24,6 +26,7 @@
   "dependencies": {
     "@base-ui/react": "^1.7.0",
     "@hookform/resolvers": "^5.7.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@shadcn/react": "^0.3.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",

@@ -1,0 +1,95 @@
+import assert from "node:assert/strict";
+import { createServer, type IncomingMessage } from "node:http";
+import type { AddressInfo } from "node:net";
+import { after, before, test } from "node:test";
+import { fileURLToPath } from "node:url";
+
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+const serverPath = fileURLToPath(new URL("../mcp/server.ts", import.meta.url));
+const token = "test-token-with-at-least-32-characters";
+const staged: Array<{ readonly authorization: string | undefined; readonly body: unknown }> = [];
+let stageStatus = 201;
+
+// Stands in for Twofold so the MCP server can be tested without the app or a live network.
+const fakeTwofold = createServer(async (request, response) => {
+  if (request.url === "/login") return void response.writeHead(200).end();
+  if (request.method === "POST" && request.url === "/api/drafts") {
+    staged.push({ authorization: request.headers.authorization, body: JSON.parse(await readBody(request)) });
+    const body = stageStatus === 201 ? { id: "draft-id", url: `${origin()}/?draft=draft-id` } : { error: "A valid API token is required." };
+    return void response.writeHead(stageStatus, { "Content-Type": "application/json" }).end(JSON.stringify(body));
+  }
+  response.writeHead(404).end();
+});
+
+function origin(): string {
+  return `http://127.0.0.1:${(fakeTwofold.address() as AddressInfo).port}`;
+}
+
+async function readBody(request: IncomingMessage): Promise<string> {
+  let body = "";
+  for await (const chunk of request) body += chunk;
+  return body;
+}
+
+async function connect(twofoldUrl: string): Promise<Client> {
+  const client = new Client({ name: "twofold-test", version: "0.0.0" });
+  await client.connect(new StdioClientTransport({
+    command: process.execPath,
+    args: [serverPath],
+    env: { PATH: process.env.PATH ?? "", TWOFOLD_URL: twofoldUrl, TWOFOLD_API_TOKEN: token },
+  }));
+  return client;
+}
+
+function text(result: Awaited<ReturnType<Client["callTool"]>>): string {
+  const content = result.content as ReadonlyArray<{ readonly type: string; readonly text?: string }>;
+  return content.map((item) => item.text ?? "").join("\n");
+}
+
+before(() => new Promise<void>((resolve) => fakeTwofold.listen(0, "127.0.0.1", resolve)));
+after(() => new Promise<void>((resolve) => fakeTwofold.close(() => resolve())));
+
+test("agents can stage a post but have no way to publish", async () => {
+  const client = await connect(origin());
+  try {
+    const { tools } = await client.listTools();
+    assert.deepEqual(tools.map((tool) => tool.name), ["stage_post"]);
+
+    const result = await client.callTool({ name: "stage_post", arguments: { text: "Long LinkedIn post", x: "Short X post", open: false } });
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(result.structuredContent, { url: `${origin()}/?draft=draft-id` });
+    assert.match(text(result), /Nothing was published/u);
+    assert.deepEqual(staged.at(-1), {
+      authorization: `Bearer ${token}`,
+      body: { text: "Long LinkedIn post", x: "Short X post" },
+    });
+  } finally {
+    await client.close();
+  }
+});
+
+test("rejected drafts come back to the agent as tool errors", async () => {
+  stageStatus = 401;
+  const client = await connect(origin());
+  try {
+    const result = await client.callTool({ name: "stage_post", arguments: { text: "Hello", open: false } });
+    assert.equal(result.isError, true);
+    assert.match(text(result), /\(401\): A valid API token is required\./u);
+  } finally {
+    stageStatus = 201;
+    await client.close();
+  }
+});
+
+test("an unreachable hosted Twofold is reported instead of started", async () => {
+  const client = await connect("https://twofold.invalid");
+  try {
+    const result = await client.callTool({ name: "stage_post", arguments: { text: "Hello", open: false } });
+    assert.equal(result.isError, true);
+    assert.match(text(result), /not reachable at https:\/\/twofold\.invalid/u);
+  } finally {
+    await client.close();
+  }
+});

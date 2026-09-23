@@ -15,3 +15,11 @@ export const connections = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.userId, table.provider] })],
 );
+
+// Drafts an agent staged for review. The editor loads one by ID; publishing still happens only in the browser.
+export const drafts = sqliteTable("drafts", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  draft: text("draft").notNull(),
+  createdAt: integer("created_at").notNull(),
+});

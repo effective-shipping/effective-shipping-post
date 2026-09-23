@@ -8,6 +8,13 @@
       "when": 1789057199429,
       "tag": "0000_light_nebula",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790155372926,
+      "tag": "0001_staged_drafts",
+      "breakpoints": true
     }
   ]
 }

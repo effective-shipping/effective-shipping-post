@@ -17,6 +17,7 @@ const worker = new Miniflare({
   d1Databases: ["DB"],
   bindings: {
     APP_PASSWORD: "worker-test-password",
+    API_TOKEN: "worker-test-api-token-with-at-least-32-characters",
     TOKEN_ENCRYPTION_KEY: "worker-test-encryption-key-at-least-32-characters",
     X_CLIENT_ID: "x-client",
     X_CLIENT_SECRET: "x-secret",
@@ -76,8 +77,29 @@ async function publish() {
 
 try {
   const database = await worker.getD1Database("DB");
-  await database.prepare(readFileSync("drizzle/0000_light_nebula.sql", "utf8")).run();
+  for (const migration of readdirSync("drizzle").filter((file) => file.endsWith(".sql")).sort()) {
+    await database.prepare(readFileSync(path.join("drizzle", migration), "utf8")).run();
+  }
+  const stage = (body, token = "worker-test-api-token-with-at-least-32-characters") => worker.dispatchFetch("http://twofold.test/api/drafts", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  assert.equal((await stage({ text: "Hello" }, "wrong-token")).status, 401);
+  assert.equal((await stage({ text: "  " })).status, 400);
+  const staged = await stage({ text: "Long version", x: "Short version", providers: ["x"] });
+  assert.equal(staged.status, 201);
+  const { id, url } = await staged.json();
+  assert.equal(url, `http://twofold.test/?draft=${id}`);
+  assert.equal((await request(`/api/drafts/${id}`)).status, 401);
+  assert.match((await request(`/?draft=${id}`)).headers.get("Location") ?? "", new RegExp(`returnTo=${encodeURIComponent(`/?draft=${id}`).replaceAll("?", "\\?")}`, "u"));
+
   assert.equal((await request("/api/session", undefined, { form: { password: "worker-test-password" } })).status, 303);
+  assert.deepEqual((await (await request(`/api/drafts/${id}`)).json()).draft, {
+    shared: "Long version", x: "Short version", linkedin: "Long version", tailored: true, selection: { x: true, linkedin: false },
+  });
+  assert.equal((await request(`/api/drafts/${"a".repeat(24)}`)).status, 404);
+  assert.equal((await request("/api/drafts/not-a-draft-id")).status, 404);
   const unconnected = (await (await request("/api/connections")).json()).accounts;
   assert.deepEqual(unconnected, [{ status: "disconnected", provider: "x" }, { status: "disconnected", provider: "linkedin" }]);
 
@@ -127,7 +149,7 @@ try {
   const expired = (await publish()).find((result) => result.provider === "linkedin");
   assert.equal(expired.kind, "failed");
   assert.equal(expired.reconnect, true);
-  console.info("Worker checks passed: simultaneous OAuth, PKCE, encrypted D1 tokens, publishing, partial failures, uncertain delivery, and token refresh. All provider requests were simulated.");
+  console.info("Worker checks passed: staged drafts, simultaneous OAuth, PKCE, encrypted D1 tokens, publishing, partial failures, uncertain delivery, and token refresh. All provider requests were simulated.");
 } finally {
   await worker.dispose();
 }

@@ -4,6 +4,7 @@ declare namespace Cloudflare {
     BUCKET?: R2Bucket;
     TOKEN_ENCRYPTION_KEY?: string;
     APP_PASSWORD?: string;
+    API_TOKEN?: string;
     X_CLIENT_ID?: string;
     X_CLIENT_SECRET?: string;
     LINKEDIN_CLIENT_ID?: string;

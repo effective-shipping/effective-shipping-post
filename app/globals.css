@@ -83,6 +83,7 @@ code { border-radius: 5px; background: var(--muted); padding: 1px 5px; font-fami
 .sign-out { color: var(--muted-foreground); }
 .notice-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #aab12d; background: #f8ff6a; padding: 10px 4vw; color: #161815; font-size: 0.86rem; font-weight: 650; }
 .notice-banner button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 1.25rem; line-height: 1; }
+.notice-banner .text-button { margin-left: 10px; color: inherit; font-size: inherit; }
 .workspace { display: grid; max-width: 1240px; grid-template-columns: minmax(0, 1.3fr) minmax(340px, 0.7fr); gap: clamp(24px, 4vw, 56px); margin: 0 auto; padding: 32px 4vw 64px; }
 .composer-column, .preview-column { min-width: 0; }
 .section-heading, .destination-row, .publish-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; }

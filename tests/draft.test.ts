@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { applyDeliveryResults, createDraft, DraftSchema } from "../lib/draft";
+import { applyDeliveryResults, createDraft, DraftSchema, StageDraftRequestSchema, stagedDraft } from "../lib/draft";
 import { countPostCharacters, linkedInPlainText, previewSegments } from "../lib/text";
 
 test("new drafts contain no sample copy and retain the entire message", () => {
@@ -49,4 +49,12 @@ test("previews mark what each network links", () => {
   assert.deepEqual(entities("linkedin"), ["https://example.com/a"]);
   assert.equal(previewSegments("x", text).map((segment) => segment.value).join(""), text.trim());
   assert.deepEqual(previewSegments("linkedin", "  "), []);
+});
+
+test("staged drafts tailor only when the agent sends a separate X version", () => {
+  const shared = stagedDraft(StageDraftRequestSchema.parse({ text: " One post " }));
+  assert.deepEqual(shared, createDraft("One post"));
+  const tailored = stagedDraft(StageDraftRequestSchema.parse({ text: "Long", x: "Short", providers: ["linkedin"] }));
+  assert.deepEqual(tailored, { shared: "Long", x: "Short", linkedin: "Long", tailored: true, selection: { x: false, linkedin: true } });
+  assert.equal(StageDraftRequestSchema.safeParse({ text: "Hi", providers: ["x", "x"] }).success, false);
 });

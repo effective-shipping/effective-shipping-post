@@ -6,7 +6,7 @@ Drafts save in your browser. Provider tokens stay encrypted in Cloudflare D1. Ea
 
 ## Run locally
 
-1. Install Node.js 22.13 or newer.
+1. Install Node.js 22.18 or newer.
 2. Install dependencies and prepare the local settings and database:
 
    ```sh
@@ -25,6 +25,25 @@ Drafts save in your browser. Provider tokens stay encrypted in Cloudflare D1. Ea
 6. Connect X, LinkedIn, or both under **Accounts**. A network without app credentials shows its setup steps and the exact callback URL to register.
 
 You can edit drafts without provider credentials. Publishing requires a connected account. Press ⌘+Enter or Ctrl+Enter in the editor to publish. Running `setup:local` again preserves your existing secrets and applies only pending migrations.
+
+## Draft posts from your coding agent
+
+Twofold includes an MCP server and a `/tweet` skill for Claude Code and Codex. When a session turns up something worth sharing, run `/tweet`, optionally followed by an angle. The agent drafts a post from the session and stages it in Twofold. Twofold opens in your browser so you can edit and publish. Agents can stage drafts but cannot publish them.
+
+1. Complete [Run locally](#run-locally). `setup:local` also generates the `API_TOKEN` that the MCP server uses.
+2. Install the skill and register the MCP server for each agent CLI on your machine:
+
+   ```sh
+   npm run setup:agent
+   ```
+
+3. Restart your agent session and run `/tweet`.
+
+If Twofold is not running, the MCP server starts it on `http://localhost:5173` and leaves it running for your review. Its log is `.wrangler/twofold-app.log`. To stop it, run `kill $(cat .wrangler/twofold-app.pid)`.
+
+To set your tone, write `~/.twofold/voice.md` in your own words. The skill reads it before drafting.
+
+To use another Twofold instance, set `TWOFOLD_URL` and `TWOFOLD_API_TOKEN` in the MCP server's environment. The MCP server needs Node.js 22.18 or newer because it runs TypeScript directly.
 
 ## Configure X
 
@@ -51,7 +70,7 @@ Twofold requests `openid`, `profile`, and `w_member_social`. It publishes throug
 
 The project supports Sites and a direct Cloudflare Worker deployment. Register the callback URLs against the origin you use.
 
-For Sites, set `APP_PASSWORD`, `TOKEN_ENCRYPTION_KEY`, `X_CLIENT_ID`, `X_CLIENT_SECRET`, `LINKEDIN_CLIENT_ID`, and `LINKEDIN_CLIENT_SECRET` as server secrets. Set `LINKEDIN_VERSION` as a plain environment value. Keep the `DB` binding in `.openai/hosting.json`. Sites applies packaged migrations during deployment.
+For Sites, set `APP_PASSWORD`, `TOKEN_ENCRYPTION_KEY`, `API_TOKEN`, `X_CLIENT_ID`, `X_CLIENT_SECRET`, `LINKEDIN_CLIENT_ID`, and `LINKEDIN_CLIENT_SECRET` as server secrets. Set `LINKEDIN_VERSION` as a plain environment value. Keep the `DB` binding in `.openai/hosting.json`. Sites applies packaged migrations during deployment.
 
 For direct Cloudflare hosting, update the database ID and custom domain in `wrangler.direct.jsonc`. Create the D1 database if needed. Set each secret with `npx wrangler secret put KEY --config wrangler.direct.jsonc`, then run:
 

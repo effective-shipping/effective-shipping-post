@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { env } from "cloudflare:workers";
 
-import { openJson, sha256Base64Url } from "@/lib/crypto";
+import { openJson, secretsMatch, sha256Base64Url } from "@/lib/crypto";
 
 export const SESSION_COOKIE = "twofold_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
@@ -31,6 +31,15 @@ export async function getAppUser(): Promise<AppUser | null> {
   } catch {
     return null;
   }
+}
+
+// Agents authenticate with a bearer token instead of the browser session. Self-hosted Twofold has one
+// token for its single user; a hosted plan would map each issued token to its own user.
+export async function getApiUserId(request: Request): Promise<AppUser["userId"] | null> {
+  const token = request.headers.get("Authorization")?.match(/^Bearer (\S+)$/u)?.[1];
+  const expected = env.API_TOKEN;
+  if (!token || !expected || expected.length < 32) return null;
+  return await secretsMatch(token, expected) ? "personal" : null;
 }
 
 export async function requireAppUser(returnTo: string): Promise<AppUser> {
