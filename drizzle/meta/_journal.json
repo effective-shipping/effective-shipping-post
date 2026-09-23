@@ -15,6 +15,13 @@
       "when": 1790155372926,
       "tag": "0001_staged_drafts",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790157492488,
+      "tag": "0002_draft_link_tickets",
+      "breakpoints": true
     }
   ]
 }

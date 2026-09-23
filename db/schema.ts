@@ -22,4 +22,7 @@ export const drafts = sqliteTable("drafts", {
   userId: text("user_id").notNull(),
   draft: text("draft").notNull(),
   createdAt: integer("created_at").notNull(),
+  // Hash of the single-use ticket in the draft link; cleared when the link is first opened.
+  ticketHash: text("ticket_hash"),
+  ticketExpiresAt: integer("ticket_expires_at"),
 });

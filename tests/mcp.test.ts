@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -11,6 +14,9 @@ const serverPath = fileURLToPath(new URL("../mcp/server.ts", import.meta.url));
 const token = "test-token-with-at-least-32-characters";
 const staged: Array<{ readonly authorization: string | undefined; readonly body: unknown }> = [];
 let stageStatus = 201;
+const home = mkdtempSync(path.join(tmpdir(), "twofold-home-"));
+mkdirSync(path.join(home, ".twofold"));
+writeFileSync(path.join(home, ".twofold/voice.md"), "Short sentences. Mention Belgrade when it fits.");
 
 // Stands in for Twofold so the MCP server can be tested without the app or a live network.
 const fakeTwofold = createServer(async (request, response) => {
@@ -38,7 +44,7 @@ async function connect(twofoldUrl: string): Promise<Client> {
   await client.connect(new StdioClientTransport({
     command: process.execPath,
     args: [serverPath],
-    env: { PATH: process.env.PATH ?? "", TWOFOLD_URL: twofoldUrl, TWOFOLD_API_TOKEN: token },
+    env: { PATH: process.env.PATH ?? "", HOME: home, TWOFOLD_URL: twofoldUrl, TWOFOLD_API_TOKEN: token },
   }));
   return client;
 }
@@ -56,6 +62,13 @@ test("agents can stage a post but have no way to publish", async () => {
   try {
     const { tools } = await client.listTools();
     assert.deepEqual(tools.map((tool) => tool.name), ["stage_post"]);
+    // Every client gets the drafting rules and the user's voice guide, with or without the skill.
+    assert.match(tools[0].description ?? "", /Never invent experiences/u);
+    assert.match(tools[0].description ?? "", /Mention Belgrade when it fits\./u);
+    const { prompts } = await client.listPrompts();
+    assert.deepEqual(prompts.map((prompt) => prompt.name), ["tweet"]);
+    const prompt = await client.getPrompt({ name: "tweet", arguments: { angle: "the login bug" } });
+    assert.match(JSON.stringify(prompt.messages), /about the login bug from this session/u);
 
     const result = await client.callTool({ name: "stage_post", arguments: { text: "Long LinkedIn post", x: "Short X post", open: false } });
     assert.equal(result.isError, undefined);

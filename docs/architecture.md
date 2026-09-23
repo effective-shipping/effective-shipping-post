@@ -28,11 +28,11 @@ Create requests have a 20-second timeout and no automatic retries. A server-side
 
 ## Agent drafts
 
-Coding agents reach Twofold through `mcp/server.ts`, a stdio MCP server with one tool, `stage_post`. The tool sends the draft to `POST /api/drafts` with the `API_TOKEN` bearer token. The route stores it in the D1 `drafts` table and returns an editor link. The server exposes no publish tool. Publishing stays a browser action by the signed-in person.
+Coding agents reach Twofold through `mcp/server.ts`, a stdio MCP server with one tool, `stage_post`. The tool sends the draft to `POST /api/drafts` with the `API_TOKEN` bearer token. The route stores it in the D1 `drafts` table and returns a link to `/open/<id>` with a single-use ticket. D1 stores only the ticket's hash. Opening the link consumes the ticket in one `UPDATE … RETURNING` statement, signs the browser in, and redirects to the editor. Tickets expire after 10 minutes. The server exposes no publish tool. Publishing stays a browser action by the signed-in person.
 
 `/?draft=<id>` loads the staged draft through `GET /api/drafts/<id>`, which requires the browser session, and then removes the ID from the address bar. If the staged draft replaces unpublished text, the notice offers to restore it. After loading, the draft lives in browser storage like any other.
 
-The HTTP API is the boundary between agents and delivery. A self-hosted MCP server starts the local app on demand. A hosted Twofold would issue a token per user and map it to that user in `getApiUserId`, without changing the MCP server or the editor. The `tweet` skill in `skills/tweet` holds the drafting guidance. Claude Code runs it as `/tweet` and Codex as `$tweet`, and `npm run setup:agent` links it for each agent CLI.
+The HTTP API is the boundary between agents and delivery. A self-hosted MCP server starts the local app on demand. A hosted Twofold would issue a token per user and map it to that user in `getApiUserId`, without changing the MCP server or the editor. The drafting rules and the user's optional `~/.twofold/voice.md` live in the `stage_post` description, so every MCP client follows them. The server also offers a `tweet` prompt. The `tweet` skill in `skills/tweet` is a thin shortcut: Claude Code runs it as `/tweet` and Codex as `$tweet`, and `npm run setup:agent` links it for each agent CLI.
 
 ## Runtime
 

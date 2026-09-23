@@ -2,6 +2,7 @@
 // Run with `node mcp/server.ts` (Node 22.18+ runs TypeScript directly). It never publishes.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
@@ -19,6 +20,25 @@ type Config = {
   // Only a loopback app can be started on demand; a hosted Twofold must already be running.
   readonly selfHosted: boolean;
 };
+
+// The drafting rules live here, in the tool description, so every MCP client gets them, whether or
+// not it has the /tweet skill installed.
+const draftingRules = `How to write the post:
+- Pick the single most useful thing from the session: a surprising cause, a fix that generalizes, a tradeoff, a number, or a tool that saved time. Use the user's angle when they give one.
+- Write in the first person, as the user, plainly and specifically. Lead with the finding. No hype, no thread emoji, no engagement bait, at most one hashtag, and no emoji unless asked.
+- State only what the session shows. Never invent experiences, feelings, effort, or numbers.
+- Leave out secrets, tokens, environment values, employer, client, and colleague names, internal hostnames, private repository or file paths, proprietary code, and unreleased plans. Tell the user what you left out.
+- Include a link only when it is public and adds something.
+- \`text\` is the LinkedIn version: 2 to 5 short paragraphs when there is enough substance.
+- Add \`x\` only when \`text\` does not fit on X: under 260 weighted characters, where a link counts as 23 and most emoji count as 2. Rewrite it shorter; never cut a sentence off.
+After staging, reply with the review link and anything you left out. Never say the post was published.`;
+
+function voiceGuide(): string {
+  const file = path.join(os.homedir(), ".twofold/voice.md");
+  if (!existsSync(file)) return "";
+  const voice = readFileSync(file, "utf8").trim();
+  return voice ? `\n\nThe user's own voice guide, which overrides the defaults above:\n${voice}` : "";
+}
 
 const StageResponseSchema = z.object({ url: z.string().url() });
 const ErrorResponseSchema = z.object({ error: z.string() });
@@ -106,6 +126,7 @@ server.registerTool(
       "Open a draft social post in Twofold so the user can edit it and publish to X and/or LinkedIn.",
       "This never publishes: the user reviews, edits, and publishes in the browser.",
       "Use when the user asks to tweet, post, or share something from this session.",
+      `\n\n${draftingRules}${voiceGuide()}`,
     ].join(" "),
     inputSchema: {
       text: z.string().min(1).max(10_000).describe("The post. Used for LinkedIn, and for X unless `x` is given."),
@@ -123,6 +144,21 @@ server.registerTool(
       structuredContent: { url },
     };
   },
+);
+
+server.registerPrompt(
+  "tweet",
+  {
+    title: "Tweet this",
+    description: "Draft a post from this session and open it in Twofold for review.",
+    argsSchema: { angle: z.string().optional().describe("What the post should be about. Defaults to the most useful thing from the session.") },
+  },
+  ({ angle }) => ({
+    messages: [{
+      role: "user",
+      content: { type: "text", text: `Draft a post ${angle ? `about ${angle}` : "about the most useful thing"} from this session, following the rules in the stage_post tool, then stage it with stage_post.` },
+    }],
+  }),
 );
 
 await server.connect(new StdioServerTransport());

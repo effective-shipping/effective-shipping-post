@@ -1,9 +1,10 @@
 import { cookies } from "next/headers";
+import type { NextRequest, NextResponse } from "next/server";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { env } from "cloudflare:workers";
 
-import { openJson, secretsMatch, sha256Base64Url } from "@/lib/crypto";
+import { openJson, sealJson, secretsMatch, sha256Base64Url } from "@/lib/crypto";
 
 export const SESSION_COOKIE = "twofold_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
@@ -40,6 +41,23 @@ export async function getApiUserId(request: Request): Promise<AppUser["userId"] 
   const expected = env.API_TOKEN;
   if (!token || !expected || expected.length < 32) return null;
   return await secretsMatch(token, expected) ? "personal" : null;
+}
+
+// Signs the browser in as the single personal user. The session records a fingerprint of the
+// password, so changing APP_PASSWORD signs every browser out.
+export async function setSessionCookie(response: NextResponse, request: NextRequest, password: string): Promise<void> {
+  const expiresAt = Date.now() + SESSION_MAX_AGE_SECONDS * 1000;
+  response.cookies.set(
+    SESSION_COOKIE,
+    await sealJson({ userId: "personal", displayName: "Ilija", expiresAt, passwordHash: await sha256Base64Url(password) }),
+    {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: request.nextUrl.protocol === "https:",
+      maxAge: SESSION_MAX_AGE_SECONDS,
+      path: "/",
+    },
+  );
 }
 
 export async function requireAppUser(returnTo: string): Promise<AppUser> {

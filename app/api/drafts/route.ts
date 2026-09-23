@@ -16,6 +16,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid draft." }, { status: 400 });
   }
 
-  const id = await saveDraft(userId, stagedDraft(parsed.data));
-  return NextResponse.json({ id, url: new URL(`/?draft=${id}`, request.url).href }, { status: 201 });
+  const { id, ticket } = await saveDraft(userId, stagedDraft(parsed.data));
+  const url = new URL(`/open/${id}`, request.url);
+  url.searchParams.set("ticket", ticket);
+  return NextResponse.json({ id, url: url.href }, { status: 201 });
 }

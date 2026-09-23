@@ -2,8 +2,8 @@ import { env } from "cloudflare:workers";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { safeReturnPath, SESSION_COOKIE, SESSION_MAX_AGE_SECONDS, type LoginError } from "@/lib/auth";
-import { sealJson, secretsMatch, sha256Base64Url } from "@/lib/crypto";
+import { safeReturnPath, setSessionCookie, type LoginError } from "@/lib/auth";
+import { secretsMatch } from "@/lib/crypto";
 import { hasAllowedOrigin } from "@/lib/request";
 
 const LoginSchema = z.object({
@@ -26,19 +26,8 @@ export async function POST(request: NextRequest) {
     return loginFailed(request, "password", returnTo);
   }
 
-  const expiresAt = Date.now() + SESSION_MAX_AGE_SECONDS * 1000;
   const response = NextResponse.redirect(new URL(returnTo, request.url), 303);
-  response.cookies.set(
-    SESSION_COOKIE,
-    await sealJson({ userId: "personal", displayName: "Ilija", expiresAt, passwordHash: await sha256Base64Url(configuredPassword) }),
-    {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: request.nextUrl.protocol === "https:",
-      maxAge: SESSION_MAX_AGE_SECONDS,
-      path: "/",
-    },
-  );
+  await setSessionCookie(response, request, configuredPassword);
   return response;
 }
 

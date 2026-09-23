@@ -28,7 +28,11 @@ You can edit drafts without provider credentials. Publishing requires a connecte
 
 ## Draft posts from your coding agent
 
-Twofold includes an MCP server and a `tweet` skill for Claude Code and Codex. When a session turns up something worth sharing, invoke the skill, optionally followed by an angle: `/tweet` in Claude Code, or `$tweet` in Codex. Codex has no custom slash commands, so `/tweet` is unrecognized there. The agent drafts a post from the session and stages it in Twofold. Twofold opens in your browser so you can edit and publish. Agents can stage drafts but cannot publish them.
+Twofold includes an MCP server and a `tweet` skill for Claude Code and Codex. When a session turns up something worth sharing, invoke the skill, optionally followed by an angle: `/tweet` in Claude Code, or `$tweet` in Codex. Codex has no custom slash commands, so `/tweet` is unrecognized there. The agent drafts a post from the session and stages it in Twofold. Twofold opens in your browser, already signed in, so you can edit and publish. Agents can stage drafts but cannot publish them.
+
+The draft link signs your browser in once and expires after 10 minutes. After that, it opens the draft in a signed-in browser and otherwise asks for your password.
+
+Other MCP clients work without the skill. Ask the agent to tweet or post about something, or use the server's `tweet` prompt. The drafting rules live in the `stage_post` tool description.
 
 1. Complete [Run locally](#run-locally). `setup:local` also generates the `API_TOKEN` that the MCP server uses.
 2. Install the skill and register the MCP server for each agent CLI on your machine:
@@ -41,7 +45,7 @@ Twofold includes an MCP server and a `tweet` skill for Claude Code and Codex. Wh
 
 If Twofold is not running, the MCP server starts it on `http://localhost:5173` and leaves it running for your review. Its log is `.wrangler/twofold-app.log`. To stop it, run `kill $(cat .wrangler/twofold-app.pid)`.
 
-To set your tone, write `~/.twofold/voice.md` in your own words. The skill reads it before drafting.
+To set your tone, write `~/.twofold/voice.md` in your own words. The MCP server adds it to the drafting rules when a session starts.
 
 To use another Twofold instance, set `TWOFOLD_URL` and `TWOFOLD_API_TOKEN` in the MCP server's environment. The MCP server needs Node.js 22.18 or newer because it runs TypeScript directly.
 

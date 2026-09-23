@@ -90,9 +90,23 @@ try {
   const staged = await stage({ text: "Long version", x: "Short version", providers: ["x"] });
   assert.equal(staged.status, 201);
   const { id, url } = await staged.json();
-  assert.equal(url, `http://twofold.test/?draft=${id}`);
+  const link = new URL(url);
+  assert.equal(link.pathname, `/open/${id}`);
   assert.equal((await request(`/api/drafts/${id}`)).status, 401);
   assert.match((await request(`/?draft=${id}`)).headers.get("Location") ?? "", new RegExp(`returnTo=${encodeURIComponent(`/?draft=${id}`).replaceAll("?", "\\?")}`, "u"));
+
+  // The draft link signs the browser in once. A reused or expired ticket falls back to the password.
+  const expiredDraft = await (await stage({ text: "Expired link" })).json();
+  await database.prepare("UPDATE drafts SET ticket_expires_at = ? WHERE id = ?").bind(Date.now() - 1, expiredDraft.id).run();
+  const expiredOpen = await worker.dispatchFetch(expiredDraft.url, { redirect: "manual" });
+  assert.match(expiredOpen.headers.get("Location") ?? "", /\/login\?returnTo=/u);
+  assert.equal(expiredOpen.headers.get("set-cookie"), null);
+  const opened = await request(`${link.pathname}${link.search}`);
+  assert.equal(new URL(opened.headers.get("Location")).pathname + new URL(opened.headers.get("Location")).search, `/?draft=${id}`);
+  assert.ok(jar.has("twofold_session"));
+  const reused = await worker.dispatchFetch(url, { redirect: "manual" });
+  assert.match(reused.headers.get("Location") ?? "", /\/login\?returnTo=/u);
+  assert.equal((await request(link.pathname)).headers.get("Location"), `http://twofold.test/?draft=${id}`);
 
   assert.equal((await request("/api/session", undefined, { form: { password: "worker-test-password" } })).status, 303);
   assert.deepEqual((await (await request(`/api/drafts/${id}`)).json()).draft, {
@@ -149,7 +163,7 @@ try {
   const expired = (await publish()).find((result) => result.provider === "linkedin");
   assert.equal(expired.kind, "failed");
   assert.equal(expired.reconnect, true);
-  console.info("Worker checks passed: staged drafts, simultaneous OAuth, PKCE, encrypted D1 tokens, publishing, partial failures, uncertain delivery, and token refresh. All provider requests were simulated.");
+  console.info("Worker checks passed: staged drafts, single-use draft links, simultaneous OAuth, PKCE, encrypted D1 tokens, publishing, partial failures, uncertain delivery, and token refresh. All provider requests were simulated.");
 } finally {
   await worker.dispose();
 }
