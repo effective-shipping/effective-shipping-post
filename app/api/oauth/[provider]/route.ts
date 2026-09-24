@@ -26,7 +26,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
     expiresAt: Date.now() + 10 * 60 * 1000,
   });
   const cookieStore = await cookies();
-  cookieStore.set(`twofold_oauth_${provider}`, sealedState, {
+  cookieStore.set(`es_post_oauth_${provider}`, sealedState, {
     httpOnly: true,
     sameSite: "lax",
     secure: request.nextUrl.protocol === "https:",

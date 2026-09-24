@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "twofold",
+  "name": "effective-shipping-post",
   "main": "dist/server/index.js",
   "compatibility_date": "2026-05-15",
   "compatibility_flags": ["nodejs_compat"],
@@ -27,7 +27,7 @@
   },
   "routes": [
     {
-      "pattern": "twofold.ilijaristovski.com",
+      "pattern": "post.effectiveshipping.com",
       "custom_domain": true
     }
   ],

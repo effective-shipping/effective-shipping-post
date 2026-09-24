@@ -1,4 +1,4 @@
-// Twofold MCP server: lets a coding agent stage a post for the person to review and publish.
+// ES Post MCP server: lets a coding agent stage a post for the person to review and publish.
 // Run with `node mcp/server.ts` (Node 22.18+ runs TypeScript directly). It never publishes.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
@@ -17,7 +17,7 @@ const startupTimeoutMs = 90_000;
 type Config = {
   readonly baseUrl: URL;
   readonly apiToken: string | null;
-  // Only a loopback app can be started on demand; a hosted Twofold must already be running.
+  // Only a loopback app can be started on demand; a hosted ES Post must already be running.
   readonly selfHosted: boolean;
 };
 
@@ -34,7 +34,7 @@ const draftingRules = `How to write the post:
 After staging, reply with the review link and anything you left out. Never say the post was published.`;
 
 function voiceGuide(): string {
-  const file = path.join(os.homedir(), ".twofold/voice.md");
+  const file = path.join(os.homedir(), ".es-post/voice.md");
   if (!existsSync(file)) return "";
   const voice = readFileSync(file, "utf8").trim();
   return voice ? `\n\nThe user's own voice guide, which overrides the defaults above:\n${voice}` : "";
@@ -46,10 +46,10 @@ const ErrorResponseSchema = z.object({ error: z.string() });
 function readConfig(): Config {
   const envFile = path.join(projectRoot, ".env.local");
   const localSettings = existsSync(envFile) ? parseEnv(readFileSync(envFile, "utf8")) : {};
-  const baseUrl = new URL(process.env.TWOFOLD_URL ?? "http://localhost:5173");
+  const baseUrl = new URL(process.env.ES_POST_URL ?? "http://localhost:5173");
   return {
     baseUrl,
-    apiToken: process.env.TWOFOLD_API_TOKEN ?? localSettings.API_TOKEN ?? null,
+    apiToken: process.env.ES_POST_API_TOKEN ?? localSettings.API_TOKEN ?? null,
     selfHosted: ["localhost", "127.0.0.1", "[::1]"].includes(baseUrl.hostname),
   };
 }
@@ -65,11 +65,11 @@ async function isReachable(baseUrl: URL): Promise<boolean> {
 
 async function ensureAppRunning(config: Config): Promise<void> {
   if (await isReachable(config.baseUrl)) return;
-  if (!config.selfHosted) throw new Error(`Twofold is not reachable at ${config.baseUrl.origin}.`);
+  if (!config.selfHosted) throw new Error(`ES Post is not reachable at ${config.baseUrl.origin}.`);
 
   const stateDirectory = path.join(projectRoot, ".wrangler");
   mkdirSync(stateDirectory, { recursive: true });
-  const logFile = path.join(stateDirectory, "twofold-app.log");
+  const logFile = path.join(stateDirectory, "es-post-app.log");
   const log = openSync(logFile, "a");
   const app = spawn(path.join(projectRoot, "node_modules/.bin/vinext"), ["dev", "--port", config.baseUrl.port || "80"], {
     cwd: projectRoot,
@@ -78,14 +78,14 @@ async function ensureAppRunning(config: Config): Promise<void> {
   });
   app.unref();
   // The app outlives this session so the person can finish reviewing. Stop it with the PID in this file.
-  if (app.pid) writeFileSync(path.join(stateDirectory, "twofold-app.pid"), `${app.pid}\n`);
+  if (app.pid) writeFileSync(path.join(stateDirectory, "es-post-app.pid"), `${app.pid}\n`);
 
   const deadline = Date.now() + startupTimeoutMs;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 1_000));
     if (await isReachable(config.baseUrl)) return;
   }
-  throw new Error(`Twofold did not start within ${startupTimeoutMs / 1000} seconds. See ${logFile}.`);
+  throw new Error(`ES Post did not start within ${startupTimeoutMs / 1000} seconds. See ${logFile}.`);
 }
 
 function openInBrowser(url: string): void {
@@ -100,7 +100,7 @@ function openInBrowser(url: string): void {
 }
 
 async function stagePost(config: Config, draft: { readonly text: string; readonly x?: string; readonly providers?: ReadonlyArray<"x" | "linkedin"> }): Promise<string> {
-  if (!config.apiToken) throw new Error("No Twofold API token. Set TWOFOLD_API_TOKEN, or run `npm run setup:local` in the Twofold project.");
+  if (!config.apiToken) throw new Error("No ES Post API token. Set ES_POST_API_TOKEN, or run `npm run setup:local` in the ES Post project.");
   await ensureAppRunning(config);
   const response = await fetch(new URL("/api/drafts", config.baseUrl), {
     method: "POST",
@@ -111,19 +111,19 @@ async function stagePost(config: Config, draft: { readonly text: string; readonl
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const error = ErrorResponseSchema.safeParse(body);
-    throw new Error(`Twofold did not accept the draft (${response.status}): ${error.success ? error.data.error : "unexpected response"}`);
+    throw new Error(`ES Post did not accept the draft (${response.status}): ${error.success ? error.data.error : "unexpected response"}`);
   }
   return StageResponseSchema.parse(body).url;
 }
 
-const server = new McpServer({ name: "twofold", version: "0.1.0" });
+const server = new McpServer({ name: "es-post", version: "0.1.0" });
 
 server.registerTool(
   "stage_post",
   {
     title: "Stage a post for review",
     description: [
-      "Open a draft social post in Twofold so the user can edit it and publish to X and/or LinkedIn.",
+      "Open a draft social post in ES Post so the user can edit it and publish to X and/or LinkedIn.",
       "This never publishes: the user reviews, edits, and publishes in the browser.",
       "Use when the user asks to tweet, post, or share something from this session.",
       `\n\n${draftingRules}${voiceGuide()}`,
@@ -140,7 +140,7 @@ server.registerTool(
     const url = await stagePost(readConfig(), draft);
     if (open) openInBrowser(url);
     return {
-      content: [{ type: "text", text: `Staged for review at ${url}${open ? " (opened in the browser)" : ""}. Nothing was published; the user edits and publishes it in Twofold.` }],
+      content: [{ type: "text", text: `Staged for review at ${url}${open ? " (opened in the browser)" : ""}. Nothing was published; the user edits and publishes it in ES Post.` }],
       structuredContent: { url },
     };
   },
@@ -150,7 +150,7 @@ server.registerPrompt(
   "post",
   {
     title: "Post this",
-    description: "Draft a post from this session and open it in Twofold for review.",
+    description: "Draft a post from this session and open it in ES Post for review.",
     argsSchema: { angle: z.string().optional().describe("What the post should be about. Defaults to the most useful thing from the session.") },
   },
   ({ angle }) => ({

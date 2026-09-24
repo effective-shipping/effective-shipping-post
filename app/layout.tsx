@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Twofold | Post to X and LinkedIn",
+  title: "Post · Effective Shipping",
   description: "A private, lightweight composer for publishing to X and LinkedIn.",
   icons: {
     icon: "/favicon.svg",

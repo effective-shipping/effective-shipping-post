@@ -137,7 +137,7 @@ export function Composer({ displayName }: { readonly displayName: string }) {
       } else {
         if (current) setDraft(current);
         if (staged?.kind === "missing") setNotice(message("That staged draft is no longer available."));
-        if (staged?.kind === "failed") setNotice(message("Twofold could not load the staged draft. Open the link again."));
+        if (staged?.kind === "failed") setNotice(message("ES Post could not load the staged draft. Open the link again."));
         if (stored.kind === "unreadable") setNotice(message("This browser could not restore your draft. Keep a copy before leaving."));
       }
       setDraftLoaded(true);
@@ -182,7 +182,7 @@ export function Composer({ displayName }: { readonly displayName: string }) {
       {
         name: "stage_crosspost",
         title: "Stage a cross-post",
-        description: "Put draft text into Twofold and select X, LinkedIn, or both. This does not publish it.",
+        description: "Put draft text into ES Post and select X, LinkedIn, or both. This does not publish it.",
         inputSchema: {
           type: "object",
           properties: {
@@ -261,7 +261,7 @@ export function Composer({ displayName }: { readonly displayName: string }) {
       if (!response.ok) {
         if (response.status >= 500) throw new Error("Delivery could not be confirmed. Check both feeds before publishing again.");
         const error = ErrorResponseSchema.safeParse(body);
-        setPublishState({ kind: "error", message: error.success ? error.data.error : "Twofold could not publish this draft." });
+        setPublishState({ kind: "error", message: error.success ? error.data.error : "ES Post could not publish this draft." });
         return;
       }
       const results = PublishResponseSchema.parse(body).results;
@@ -321,7 +321,7 @@ export function Composer({ displayName }: { readonly displayName: string }) {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <span className="brand"><span className="brand-mark">2F</span><span>Twofold</span></span>
+        <span className="brand"><span className="brand-mark">ES</span><span>Post</span></span>
         <form method="post" action="/logout">
           <Button type="submit" variant="ghost" size="sm" className="sign-out"><LogOut /> Sign out</Button>
         </form>

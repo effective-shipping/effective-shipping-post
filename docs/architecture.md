@@ -1,6 +1,6 @@
-# Twofold architecture
+# ES Post architecture
 
-Twofold posts directly to the selected networks. A private two-network composer needs independent delivery results, but it does not need a queue until scheduling becomes a requirement.
+ES Post posts directly to the selected networks. A private two-network composer needs independent delivery results, but it does not need a queue until scheduling becomes a requirement.
 
 ## Authentication and connections
 
@@ -30,14 +30,14 @@ Create requests have a 20-second timeout and no automatic retries. A server-side
 
 ## Agent drafts
 
-Coding agents reach Twofold through `mcp/server.ts`, a stdio MCP server with one tool, `stage_post`. The tool sends the draft to `POST /api/drafts` with the `API_TOKEN` bearer token. The route stores it in the D1 `drafts` table and returns a link to `/open/<id>` with a single-use ticket. D1 stores only the ticket's hash. Opening the link consumes the ticket in one `UPDATE … RETURNING` statement, signs the browser in, and redirects to the editor. Tickets expire after 10 minutes. The server exposes no publish tool. Publishing stays a browser action by the signed-in person.
+Coding agents reach ES Post through `mcp/server.ts`, a stdio MCP server with one tool, `stage_post`. The tool sends the draft to `POST /api/drafts` with the `API_TOKEN` bearer token. The route stores it in the D1 `drafts` table and returns a link to `/open/<id>` with a single-use ticket. D1 stores only the ticket's hash. Opening the link consumes the ticket in one `UPDATE … RETURNING` statement, signs the browser in, and redirects to the editor. Tickets expire after 10 minutes. The server exposes no publish tool. Publishing stays a browser action by the signed-in person.
 
 `/?draft=<id>` loads the staged draft through `GET /api/drafts/<id>`, which requires the browser session, and then removes the ID from the address bar. If the staged draft replaces unpublished text, the notice offers to restore it. After loading, the draft lives in browser storage like any other.
 
-The HTTP API is the boundary between agents and delivery. A self-hosted MCP server starts the local app on demand. A hosted Twofold would issue a token per user and map it to that user in `getApiUserId`, without changing the MCP server or the editor. The drafting rules and the user's optional `~/.twofold/voice.md` live in the `stage_post` description, so every MCP client follows them. The server also offers a `post` prompt. The `post` skill in `skills/post` is a thin shortcut: Claude Code runs it as `/post` and Codex as `$post`, and `npm run setup:agent` links it for each agent CLI.
+The HTTP API is the boundary between agents and delivery. A self-hosted MCP server starts the local app on demand. A hosted ES Post would issue a token per user and map it to that user in `getApiUserId`, without changing the MCP server or the editor. The drafting rules and the user's optional `~/.es-post/voice.md` live in the `stage_post` description, so every MCP client follows them. The server also offers a `post` prompt. The `post` skill in `skills/post` is a thin shortcut: Claude Code runs it as `/post` and Codex as `$post`, and `npm run setup:agent` links it for each agent CLI.
 
 ## Runtime
 
 Vinext builds React server and client code for Cloudflare Workers. The Sites build plugin stages hosting metadata and Drizzle migrations alongside the Worker. `wrangler.local.jsonc` uses the same local D1 ID as the development server, while `wrangler.direct.jsonc` configures the direct production deployment.
 
-The Node regression tests check character rules, retry selections, staged drafts, and the MCP server over stdio against a stand-in Twofold. The smoke script exercises the actual running app, session cookies, and D1 without sending live posts.
+The Node regression tests check character rules, retry selections, staged drafts, and the MCP server over stdio against a stand-in ES Post. The smoke script exercises the actual running app, session cookies, and D1 without sending live posts.

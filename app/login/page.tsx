@@ -22,7 +22,7 @@ export default async function LoginPage({
   return (
     <main className="login-shell">
       <section className="login-card">
-        <span className="brand"><span className="brand-mark">2F</span><span>Twofold</span></span>
+        <span className="brand"><span className="brand-mark">ES</span><span>Post</span></span>
         <h1>Sign in</h1>
         <p className="login-intro">Your publishing desk for X and LinkedIn.</p>
         <form className="login-form" method="post" action="/api/session">

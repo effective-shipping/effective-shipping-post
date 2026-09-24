@@ -52,7 +52,7 @@ const worker = new Miniflare({
 
 const jar = new Map();
 async function request(path, body, { form } = {}) {
-  const response = await worker.dispatchFetch(`http://twofold.test${path}`, {
+  const response = await worker.dispatchFetch(`http://es-post.test${path}`, {
     redirect: "manual",
     ...(body !== undefined ? { method: "POST", body: JSON.stringify(body) } : {}),
     ...(form !== undefined ? { method: "POST", body: new URLSearchParams(form) } : {}),
@@ -80,7 +80,7 @@ try {
   for (const migration of readdirSync("drizzle").filter((file) => file.endsWith(".sql")).sort()) {
     await database.prepare(readFileSync(path.join("drizzle", migration), "utf8")).run();
   }
-  const stage = (body, token = "worker-test-api-token-with-at-least-32-characters") => worker.dispatchFetch("http://twofold.test/api/drafts", {
+  const stage = (body, token = "worker-test-api-token-with-at-least-32-characters") => worker.dispatchFetch("http://es-post.test/api/drafts", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -103,10 +103,10 @@ try {
   assert.equal(expiredOpen.headers.get("set-cookie"), null);
   const opened = await request(`${link.pathname}${link.search}`);
   assert.equal(new URL(opened.headers.get("Location")).pathname + new URL(opened.headers.get("Location")).search, `/?draft=${id}`);
-  assert.ok(jar.has("twofold_session"));
+  assert.ok(jar.has("es_post_session"));
   const reused = await worker.dispatchFetch(url, { redirect: "manual" });
   assert.match(reused.headers.get("Location") ?? "", /\/login\?returnTo=/u);
-  assert.equal((await request(link.pathname)).headers.get("Location"), `http://twofold.test/?draft=${id}`);
+  assert.equal((await request(link.pathname)).headers.get("Location"), `http://es-post.test/?draft=${id}`);
 
   assert.equal((await request("/api/session", undefined, { form: { password: "worker-test-password" } })).status, 303);
   assert.deepEqual((await (await request(`/api/drafts/${id}`)).json()).draft, {
@@ -121,8 +121,8 @@ try {
   const linkedinStart = await request("/api/oauth/linkedin");
   assert.equal(xStart.status, 307);
   assert.equal(linkedinStart.status, 307);
-  assert.ok(jar.has("twofold_oauth_x"));
-  assert.ok(jar.has("twofold_oauth_linkedin"));
+  assert.ok(jar.has("es_post_oauth_x"));
+  assert.ok(jar.has("es_post_oauth_linkedin"));
   const xAuthorization = new URL(xStart.headers.get("Location"));
   assert.equal(xAuthorization.searchParams.get("code_challenge_method"), "S256");
 

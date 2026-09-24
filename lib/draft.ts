@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { ProviderSchema, type DestinationResult, type Provider } from "./domain";
 
-export const DRAFT_KEY = "twofold:draft";
+export const DRAFT_KEY = "es-post:draft";
 export const DraftIdSchema = z.string().regex(/^[\w-]{24}$/u);
 export const DraftSchema = z.object({
   shared: z.string(),

@@ -1,4 +1,4 @@
-// Installs the /post skill and registers the Twofold MCP server for each agent CLI found on this machine.
+// Installs the /post skill and registers the ES Post MCP server for each agent CLI found on this machine.
 // Safe to run again: it skips anything already installed and never overwrites files it did not create.
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readlinkSync, symlinkSync } from "node:fs";
@@ -11,8 +11,8 @@ const skillSource = path.join(projectRoot, "skills/post");
 const serverCommand = ["node", path.join(projectRoot, "mcp/server.ts")];
 
 const harnesses = [
-  { name: "Claude Code", cli: "claude", skillsDirectory: path.join(os.homedir(), ".claude/skills"), addArgs: ["mcp", "add", "--scope", "user", "twofold", "--", ...serverCommand] },
-  { name: "Codex", cli: "codex", skillsDirectory: path.join(os.homedir(), ".codex/skills"), addArgs: ["mcp", "add", "twofold", "--", ...serverCommand] },
+  { name: "Claude Code", cli: "claude", skillsDirectory: path.join(os.homedir(), ".claude/skills"), addArgs: ["mcp", "add", "--scope", "user", "es-post", "--", ...serverCommand] },
+  { name: "Codex", cli: "codex", skillsDirectory: path.join(os.homedir(), ".codex/skills"), addArgs: ["mcp", "add", "es-post", "--", ...serverCommand] },
 ];
 
 function run(command, args) {
@@ -39,7 +39,7 @@ function isSymlink(file) {
 }
 
 function registerServer(harness) {
-  if (run(harness.cli, ["mcp", "get", "twofold"]).status === 0) return "already registered";
+  if (run(harness.cli, ["mcp", "get", "es-post"]).status === 0) return "already registered";
   const result = run(harness.cli, harness.addArgs);
   if (result.status !== 0) throw new Error(`${harness.cli} ${harness.addArgs.join(" ")} failed:\n${result.stderr || result.stdout}`);
   return "registered";
@@ -58,5 +58,5 @@ for (const harness of harnesses) {
 if (installed === 0) {
   console.info(`No supported agent CLI found. Register this MCP server manually: ${serverCommand.join(" ")}`);
 } else {
-  console.info("Start a new agent session, then run /post in Claude Code or $post in Codex. The MCP server starts Twofold on http://localhost:5173 when needed.");
+  console.info("Start a new agent session, then run /post in Claude Code or $post in Codex. The MCP server starts ES Post on http://localhost:5173 when needed.");
 }

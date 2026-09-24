@@ -6,7 +6,7 @@ import { env } from "cloudflare:workers";
 
 import { openJson, sealJson, secretsMatch, sha256Base64Url } from "@/lib/crypto";
 
-export const SESSION_COOKIE = "twofold_session";
+export const SESSION_COOKIE = "es_post_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 const SessionSchema = z.object({
@@ -34,7 +34,7 @@ export async function getAppUser(): Promise<AppUser | null> {
   }
 }
 
-// Agents authenticate with a bearer token instead of the browser session. Self-hosted Twofold has one
+// Agents authenticate with a bearer token instead of the browser session. Self-hosted ES Post has one
 // token for its single user; a hosted plan would map each issued token to its own user.
 export async function getApiUserId(request: Request): Promise<AppUser["userId"] | null> {
   const token = request.headers.get("Authorization")?.match(/^Bearer (\S+)$/u)?.[1];
@@ -71,8 +71,8 @@ export function safeReturnPath(value: string | null | undefined): string {
   if (!value?.startsWith("/") || value.startsWith("//")) return "/";
 
   try {
-    const url = new URL(value, "https://twofold.local");
-    if (url.origin !== "https://twofold.local" || url.pathname === "/login") return "/";
+    const url = new URL(value, "https://es-post.local");
+    if (url.origin !== "https://es-post.local" || url.pathname === "/login") return "/";
     return `${url.pathname}${url.search}${url.hash}`;
   } catch {
     return "/";

@@ -1,6 +1,6 @@
-# Twofold
+# Effective Shipping Post
 
-Twofold is a private composer for publishing text and links to X and LinkedIn. Write shared copy or tailor each version, check the previews, then publish to the selected accounts.
+ES Post is a private composer for publishing text and links to X and LinkedIn. Write shared copy or tailor each version, check the previews, then publish to the selected accounts.
 
 Drafts save in your browser. Provider tokens stay encrypted in Cloudflare D1. Each network returns its own result. Successful and unconfirmed destinations are deselected to prevent duplicate posts when you retry a failed destination.
 
@@ -24,11 +24,11 @@ Drafts save in your browser. Provider tokens stay encrypted in Cloudflare D1. Ea
 5. Open `http://localhost:5173` and sign in with your personal password.
 6. Connect X, LinkedIn, or both under **Accounts**. A network without app credentials shows its setup steps and the exact callback URL to register.
 
-You can edit drafts without provider credentials. Publishing requires a connected account. To post on X without a developer app, choose **Post on X.com** in the X preview. It opens X's own composer with your text, costs nothing, and deselects X in Twofold so the post is not sent twice. Press ⌘+Enter or Ctrl+Enter in the editor to publish. Running `setup:local` again preserves your existing secrets and applies only pending migrations.
+You can edit drafts without provider credentials. Publishing requires a connected account. To post on X without a developer app, choose **Post on X.com** in the X preview. It opens X's own composer with your text, costs nothing, and deselects X in ES Post so the post is not sent twice. Press ⌘+Enter or Ctrl+Enter in the editor to publish. Running `setup:local` again preserves your existing secrets and applies only pending migrations.
 
 ## Draft posts from your coding agent
 
-Twofold includes an MCP server and a `post` skill for Claude Code and Codex. When a session turns up something worth sharing, invoke the skill, optionally followed by an angle: `/post` in Claude Code, or `$post` in Codex. Codex has no custom slash commands, so `/post` is unrecognized there. The agent drafts a post from the session and stages it in Twofold. Twofold opens in your browser, already signed in, so you can edit and publish. Agents can stage drafts but cannot publish them.
+ES Post includes an MCP server and a `post` skill for Claude Code and Codex. When a session turns up something worth sharing, invoke the skill, optionally followed by an angle: `/post` in Claude Code, or `$post` in Codex. Codex has no custom slash commands, so `/post` is unrecognized there. The agent drafts a post from the session and stages it in ES Post. ES Post opens in your browser, already signed in, so you can edit and publish. Agents can stage drafts but cannot publish them.
 
 The draft link signs your browser in once and expires after 10 minutes. After that, it opens the draft in a signed-in browser and otherwise asks for your password.
 
@@ -43,11 +43,11 @@ Other MCP clients work without the skill. Ask the agent to tweet or post about s
 
 3. Start a new agent session and run `/post` in Claude Code or `$post` in Codex.
 
-If Twofold is not running, the MCP server starts it on `http://localhost:5173` and leaves it running for your review. Its log is `.wrangler/twofold-app.log`. To stop it, run `kill $(cat .wrangler/twofold-app.pid)`.
+If ES Post is not running, the MCP server starts it on `http://localhost:5173` and leaves it running for your review. Its log is `.wrangler/es-post-app.log`. To stop it, run `kill $(cat .wrangler/es-post-app.pid)`.
 
-To set your tone, write `~/.twofold/voice.md` in your own words. The MCP server adds it to the drafting rules when a session starts.
+To set your tone, write `~/.es-post/voice.md` in your own words. The MCP server adds it to the drafting rules when a session starts.
 
-To use another Twofold instance, set `TWOFOLD_URL` and `TWOFOLD_API_TOKEN` in the MCP server's environment. The MCP server needs Node.js 22.18 or newer because it runs TypeScript directly.
+To use another ES Post instance, set `ES_POST_URL` and `ES_POST_API_TOKEN` in the MCP server's environment. The MCP server needs Node.js 22.18 or newer because it runs TypeScript directly.
 
 ## Configure X
 
@@ -57,7 +57,7 @@ To use another Twofold instance, set `TWOFOLD_URL` and `TWOFOLD_API_TOKEN` in th
 4. Register your deployed origin followed by `/api/oauth/x/callback` as the production callback.
 5. Set `X_CLIENT_ID` and `X_CLIENT_SECRET` in `.env.local`.
 
-Twofold requests `tweet.read`, `tweet.write`, `users.read`, and `offline.access`. Your API plan must allow `POST /2/tweets`. The editor and server use X's official `twitter-text` library for [weighted character counting](https://docs.x.com/fundamentals/counting-characters).
+ES Post requests `tweet.read`, `tweet.write`, `users.read`, and `offline.access`. Your API plan must allow `POST /2/tweets`. The editor and server use X's official `twitter-text` library for [weighted character counting](https://docs.x.com/fundamentals/counting-characters).
 
 ## Configure LinkedIn
 
@@ -68,7 +68,7 @@ Twofold requests `tweet.read`, `tweet.write`, `users.read`, and `offline.access`
 5. Set `LINKEDIN_CLIENT_ID` and `LINKEDIN_CLIENT_SECRET` in `.env.local`.
 6. Set `LINKEDIN_VERSION` to a supported monthly API version. The default is `202608`.
 
-Twofold requests `openid`, `profile`, and `w_member_social`. It publishes through the [Posts API](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api) and escapes punctuation using LinkedIn's [little text format](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/little-text-format).
+ES Post requests `openid`, `profile`, and `w_member_social`. It publishes through the [Posts API](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api) and escapes punctuation using LinkedIn's [little text format](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/little-text-format).
 
 ## Configure hosting
 

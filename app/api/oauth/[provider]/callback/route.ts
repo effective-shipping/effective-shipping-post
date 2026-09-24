@@ -15,7 +15,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
   if (!providerResult.success) return NextResponse.redirect(new URL("/?notice=oauth-failed", request.url));
 
   const cookieStore = await cookies();
-  const oauthCookie = `twofold_oauth_${providerResult.data}`;
+  const oauthCookie = `es_post_oauth_${providerResult.data}`;
   const sealedState = cookieStore.get(oauthCookie)?.value;
   cookieStore.delete(oauthCookie);
 
