@@ -70,3 +70,11 @@ export const ConnectionSummarySchema = z.object({
   accountHandle: z.string().nullable(),
 });
 export type ConnectionSummary = z.infer<typeof ConnectionSummarySchema>;
+
+// Each network is either connected, ready to connect, or missing its app credentials.
+export const AccountSchema = z.discriminatedUnion("status", [
+  ConnectionSummarySchema.extend({ status: z.literal("connected") }),
+  z.object({ status: z.literal("disconnected"), provider: ProviderSchema }),
+  z.object({ status: z.literal("unconfigured"), provider: ProviderSchema, callbackUrl: z.string().url() }),
+]);
+export type Account = z.infer<typeof AccountSchema>;

@@ -7,7 +7,7 @@ const settings = parseEnv(readFileSync(new URL("../.env.local", import.meta.url)
 assert.ok(settings.APP_PASSWORD, "Run npm run setup:local before testing.");
 let cookie;
 
-async function request(path, { method = "GET", body, headers = {}, authenticated = true } = {}) {
+async function request(path, { method = "GET", body, form, headers = {}, authenticated = true } = {}) {
   return fetch(new URL(path, origin), {
     method,
     redirect: "manual",
@@ -17,6 +17,7 @@ async function request(path, { method = "GET", body, headers = {}, authenticated
       ...headers,
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    ...(form !== undefined ? { body: new URLSearchParams(form) } : {}),
   });
 }
 
@@ -24,12 +25,17 @@ assert.equal((await request("/")).status, 307);
 assert.equal((await request("/login")).status, 200);
 assert.equal((await request("/api/connections")).status, 401);
 assert.equal((await request("/api/posts", { method: "POST", body: {} })).status, 401);
-assert.equal((await request("/api/session", { method: "POST", body: { password: "wrong-password" } })).status, 401);
-assert.equal((await request("/api/session", { method: "POST", body: { password: settings.APP_PASSWORD }, headers: { Origin: "https://untrusted.example" } })).status, 403);
+assert.equal((await request("/api/drafts", { method: "POST", body: { text: "Hello" } })).status, 401);
+assert.equal((await request("/api/drafts", { method: "POST", body: { text: "Hello" }, headers: { Authorization: "Bearer wrong-token-with-at-least-32-characters" } })).status, 401);
+const rejected = await request("/api/session", { method: "POST", form: { password: "wrong-password" } });
+assert.equal(rejected.status, 303);
+assert.match(rejected.headers.get("location") ?? "", /\/login\?error=password/u);
+assert.equal(rejected.headers.get("set-cookie"), null);
+assert.equal((await request("/api/session", { method: "POST", form: { password: settings.APP_PASSWORD }, headers: { Origin: "https://untrusted.example" } })).status, 403);
 
-const login = await request("/api/session", { method: "POST", body: { password: settings.APP_PASSWORD, returnTo: "//untrusted.example" } });
-assert.equal(login.status, 200);
-assert.equal((await login.json()).returnTo, "/");
+const login = await request("/api/session", { method: "POST", form: { password: settings.APP_PASSWORD, returnTo: "//untrusted.example" } });
+assert.equal(login.status, 303);
+assert.equal(new URL(login.headers.get("location"), origin).href, new URL("/", origin).href);
 const setCookie = login.headers.get("set-cookie");
 assert.ok(setCookie?.includes("HttpOnly"));
 assert.match(setCookie ?? "", /SameSite=Lax/iu);
@@ -39,8 +45,9 @@ assert.equal((await request("/login")).status, 307);
 
 const connections = await request("/api/connections");
 assert.equal(connections.status, 200);
-const accounts = (await connections.json()).connections;
-assert.ok(Array.isArray(accounts));
+const accounts = (await connections.json()).accounts;
+assert.deepEqual(accounts.map((account) => account.provider), ["x", "linkedin"]);
+assert.ok(accounts.every((account) => ["connected", "disconnected", "unconfigured"].includes(account.status)));
 assert.ok(accounts.every((account) => !("accessToken" in account) && !("refreshToken" in account)));
 assert.equal((await request("/api/posts", { method: "POST", body: { destinations: [] } })).status, 400);
 assert.equal((await request("/api/posts", { method: "POST", body: { destinations: [{ provider: "x", text: "😀".repeat(141) }] } })).status, 400);
@@ -50,7 +57,7 @@ assert.equal((await request("/api/connections?provider=x", { method: "DELETE", h
 assert.equal((await request("/api/oauth/unknown")).status, 404);
 assert.equal((await request("/api/oauth/x/callback?code=invalid&state=invalid")).status, 307);
 
-if (!accounts.some((account) => account.provider === "x")) {
+if (!accounts.some((account) => account.provider === "x" && account.status === "connected")) {
   const result = await request("/api/posts", { method: "POST", body: { destinations: [{ provider: "x", text: "Unconnected smoke test" }] } });
   assert.equal(result.status, 200);
   const outcomes = (await result.json()).results;
@@ -60,9 +67,10 @@ if (!accounts.some((account) => account.provider === "x")) {
 
 const tampered = cookie.slice(0, -2) + "!!";
 assert.equal((await request("/api/connections", { headers: { Cookie: tampered } })).status, 401);
-const logout = await request("/api/session", { method: "DELETE" });
-assert.equal(logout.status, 204);
+assert.equal((await request("/logout", { method: "POST", headers: { Origin: "https://untrusted.example" } })).status, 403);
+const logout = await request("/logout", { method: "POST" });
+assert.equal(logout.status, 303);
 assert.ok(logout.headers.get("set-cookie")?.includes("1970"));
 cookie = undefined;
 assert.equal((await request("/api/connections")).status, 401);
-console.info("Smoke checks passed: login, protected composer, D1, validation, OAuth rejection, and logout. No live posts were sent.");
+console.info("Smoke checks passed: login, protected composer, draft staging auth, D1, validation, OAuth rejection, and logout. No live posts were sent.");

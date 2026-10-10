@@ -62,3 +62,18 @@ export async function sha256Base64Url(value: string): Promise<string> {
   return encodeBase64Url(new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(value))));
 }
 
+
+// Compares digests so the time taken does not reveal how much of a secret matched.
+export async function secretsMatch(candidate: string, expected: string): Promise<boolean> {
+  const [candidateHash, expectedHash] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(candidate)),
+    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
+  ]);
+  const left = new Uint8Array(candidateHash);
+  const right = new Uint8Array(expectedHash);
+  let difference = left.length ^ right.length;
+  for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
+    difference |= left[index] ^ right[index];
+  }
+  return difference === 0;
+}

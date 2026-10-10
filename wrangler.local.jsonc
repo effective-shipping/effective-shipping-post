@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "twofold-local",
+  "name": "effective-shipping-post-local",
   "compatibility_date": "2026-05-15",
   "d1_databases": [
     {

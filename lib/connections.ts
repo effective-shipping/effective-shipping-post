@@ -1,6 +1,5 @@
-import { env } from "cloudflare:workers";
-
 import { openText, sealText } from "./crypto";
+import { database } from "./database";
 import {
   ConnectionSummarySchema,
   ProviderConnectionSchema,
@@ -18,11 +17,6 @@ type ConnectionRow = {
   refresh_token: string | null;
   expires_at: number | null;
 };
-
-function database(): D1Database {
-  if (!env.DB) throw new Error("The DB binding is unavailable.");
-  return env.DB;
-}
 
 export async function saveConnection(userId: string, connection: ProviderConnection): Promise<void> {
   const accessToken = await sealText(connection.accessToken);

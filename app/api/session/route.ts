@@ -2,8 +2,8 @@ import { env } from "cloudflare:workers";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { safeReturnPath, SESSION_COOKIE, SESSION_MAX_AGE_SECONDS } from "@/lib/auth";
-import { sealJson, sha256Base64Url } from "@/lib/crypto";
+import { safeReturnPath, setSessionCookie, type LoginError } from "@/lib/auth";
+import { secretsMatch } from "@/lib/crypto";
 import { hasAllowedOrigin } from "@/lib/request";
 
 const LoginSchema = z.object({
@@ -11,57 +11,28 @@ const LoginSchema = z.object({
   returnTo: z.string().optional(),
 });
 
-const encoder = new TextEncoder();
-
+// The login page posts a native form, so sign-in works before any JavaScript loads.
 export async function POST(request: NextRequest) {
   if (!hasAllowedOrigin(request)) return NextResponse.json({ error: "Request origin is not allowed." }, { status: 403 });
-  if (!request.headers.get("Content-Type")?.startsWith("application/json")) {
-    return NextResponse.json({ error: "Send a JSON request." }, { status: 415 });
-  }
+  const form = await request.formData().catch(() => null);
+  const parsed = LoginSchema.safeParse(form ? Object.fromEntries(form) : null);
+  const returnTo = safeReturnPath(parsed.success ? parsed.data.returnTo : null);
+
   const configuredPassword = env.APP_PASSWORD;
   if (!configuredPassword || !env.TOKEN_ENCRYPTION_KEY || env.TOKEN_ENCRYPTION_KEY.length < 32) {
-    return NextResponse.json({ error: "Login is not configured." }, { status: 503 });
+    return loginFailed(request, "unconfigured", returnTo);
+  }
+  if (!parsed.success || !(await secretsMatch(parsed.data.password, configuredPassword))) {
+    return loginFailed(request, "password", returnTo);
   }
 
-  const body: unknown = await request.json().catch(() => null);
-  const parsed = LoginSchema.safeParse(body);
-  if (!parsed.success || !(await passwordsMatch(parsed.data.password, configuredPassword))) {
-    return NextResponse.json({ error: "That password is not correct." }, { status: 401 });
-  }
-
-  const expiresAt = Date.now() + SESSION_MAX_AGE_SECONDS * 1000;
-  const response = NextResponse.json({ returnTo: safeReturnPath(parsed.data.returnTo) });
-  response.cookies.set(
-    SESSION_COOKIE,
-    await sealJson({ userId: "personal", displayName: "Ilija", expiresAt, passwordHash: await sha256Base64Url(configuredPassword) }),
-    {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: request.nextUrl.protocol === "https:",
-      maxAge: SESSION_MAX_AGE_SECONDS,
-      path: "/",
-    },
-  );
+  const response = NextResponse.redirect(new URL(returnTo, request.url), 303);
+  await setSessionCookie(response, request, configuredPassword);
   return response;
 }
 
-export async function DELETE(request: NextRequest) {
-  if (!hasAllowedOrigin(request)) return NextResponse.json({ error: "Request origin is not allowed." }, { status: 403 });
-  const response = new NextResponse(null, { status: 204 });
-  response.cookies.set(SESSION_COOKIE, "", { expires: new Date(0), path: "/" });
-  return response;
-}
-
-async function passwordsMatch(candidate: string, expected: string): Promise<boolean> {
-  const [candidateHash, expectedHash] = await Promise.all([
-    crypto.subtle.digest("SHA-256", encoder.encode(candidate)),
-    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
-  ]);
-  const left = new Uint8Array(candidateHash);
-  const right = new Uint8Array(expectedHash);
-  let difference = left.length ^ right.length;
-  for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
-    difference |= left[index] ^ right[index];
-  }
-  return difference === 0;
+function loginFailed(request: NextRequest, error: LoginError, returnTo: string): NextResponse {
+  const url = new URL("/login", request.url);
+  url.search = new URLSearchParams({ error, returnTo }).toString();
+  return NextResponse.redirect(url, 303);
 }

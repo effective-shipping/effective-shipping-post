@@ -1,4 +1,4 @@
-type TwofoldWebMcpTool = {
+type EsPostWebMcpTool = {
   readonly name: string;
   readonly title?: string;
   readonly description: string;
@@ -13,7 +13,7 @@ type TwofoldWebMcpTool = {
 interface Document {
   readonly modelContext?: {
     registerTool(
-      tool: TwofoldWebMcpTool,
+      tool: EsPostWebMcpTool,
       options?: { readonly signal?: AbortSignal },
     ): void | Promise<void>;
   };

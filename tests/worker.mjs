@@ -17,6 +17,7 @@ const worker = new Miniflare({
   d1Databases: ["DB"],
   bindings: {
     APP_PASSWORD: "worker-test-password",
+    API_TOKEN: "worker-test-api-token-with-at-least-32-characters",
     TOKEN_ENCRYPTION_KEY: "worker-test-encryption-key-at-least-32-characters",
     X_CLIENT_ID: "x-client",
     X_CLIENT_SECRET: "x-secret",
@@ -50,10 +51,11 @@ const worker = new Miniflare({
 });
 
 const jar = new Map();
-async function request(path, body) {
-  const response = await worker.dispatchFetch(`http://twofold.test${path}`, {
+async function request(path, body, { form } = {}) {
+  const response = await worker.dispatchFetch(`http://es-post.test${path}`, {
     redirect: "manual",
     ...(body !== undefined ? { method: "POST", body: JSON.stringify(body) } : {}),
+    ...(form !== undefined ? { method: "POST", body: new URLSearchParams(form) } : {}),
     headers: {
       Cookie: [...jar.entries()].map(([key, value]) => `${key}=${value}`).join("; "),
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
@@ -75,15 +77,52 @@ async function publish() {
 
 try {
   const database = await worker.getD1Database("DB");
-  await database.prepare(readFileSync("drizzle/0000_light_nebula.sql", "utf8")).run();
-  assert.equal((await request("/api/session", { password: "worker-test-password" })).status, 200);
+  for (const migration of readdirSync("drizzle").filter((file) => file.endsWith(".sql")).sort()) {
+    await database.prepare(readFileSync(path.join("drizzle", migration), "utf8")).run();
+  }
+  const stage = (body, token = "worker-test-api-token-with-at-least-32-characters") => worker.dispatchFetch("http://es-post.test/api/drafts", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  assert.equal((await stage({ text: "Hello" }, "wrong-token")).status, 401);
+  assert.equal((await stage({ text: "  " })).status, 400);
+  const staged = await stage({ text: "Long version", x: "Short version", providers: ["x"] });
+  assert.equal(staged.status, 201);
+  const { id, url } = await staged.json();
+  const link = new URL(url);
+  assert.equal(link.pathname, `/open/${id}`);
+  assert.equal((await request(`/api/drafts/${id}`)).status, 401);
+  assert.match((await request(`/?draft=${id}`)).headers.get("Location") ?? "", new RegExp(`returnTo=${encodeURIComponent(`/?draft=${id}`).replaceAll("?", "\\?")}`, "u"));
+
+  // The draft link signs the browser in once. A reused or expired ticket falls back to the password.
+  const expiredDraft = await (await stage({ text: "Expired link" })).json();
+  await database.prepare("UPDATE drafts SET ticket_expires_at = ? WHERE id = ?").bind(Date.now() - 1, expiredDraft.id).run();
+  const expiredOpen = await worker.dispatchFetch(expiredDraft.url, { redirect: "manual" });
+  assert.match(expiredOpen.headers.get("Location") ?? "", /\/login\?returnTo=/u);
+  assert.equal(expiredOpen.headers.get("set-cookie"), null);
+  const opened = await request(`${link.pathname}${link.search}`);
+  assert.equal(new URL(opened.headers.get("Location")).pathname + new URL(opened.headers.get("Location")).search, `/?draft=${id}`);
+  assert.ok(jar.has("es_post_session"));
+  const reused = await worker.dispatchFetch(url, { redirect: "manual" });
+  assert.match(reused.headers.get("Location") ?? "", /\/login\?returnTo=/u);
+  assert.equal((await request(link.pathname)).headers.get("Location"), `http://es-post.test/?draft=${id}`);
+
+  assert.equal((await request("/api/session", undefined, { form: { password: "worker-test-password" } })).status, 303);
+  assert.deepEqual((await (await request(`/api/drafts/${id}`)).json()).draft, {
+    shared: "Long version", x: "Short version", linkedin: "Long version", tailored: true, selection: { x: true, linkedin: false },
+  });
+  assert.equal((await request(`/api/drafts/${"a".repeat(24)}`)).status, 404);
+  assert.equal((await request("/api/drafts/not-a-draft-id")).status, 404);
+  const unconnected = (await (await request("/api/connections")).json()).accounts;
+  assert.deepEqual(unconnected, [{ status: "disconnected", provider: "x" }, { status: "disconnected", provider: "linkedin" }]);
 
   const xStart = await request("/api/oauth/x");
   const linkedinStart = await request("/api/oauth/linkedin");
   assert.equal(xStart.status, 307);
   assert.equal(linkedinStart.status, 307);
-  assert.ok(jar.has("twofold_oauth_x"));
-  assert.ok(jar.has("twofold_oauth_linkedin"));
+  assert.ok(jar.has("es_post_oauth_x"));
+  assert.ok(jar.has("es_post_oauth_linkedin"));
   const xAuthorization = new URL(xStart.headers.get("Location"));
   assert.equal(xAuthorization.searchParams.get("code_challenge_method"), "S256");
 
@@ -93,8 +132,9 @@ try {
     assert.equal(callback.status, 307);
     assert.ok(callback.headers.get("Location")?.includes("notice=connected"));
   }
-  const accounts = (await (await request("/api/connections")).json()).connections;
+  const accounts = (await (await request("/api/connections")).json()).accounts;
   assert.equal(accounts.length, 2);
+  assert.ok(accounts.every((account) => account.status === "connected"));
   assert.ok(accounts.every((account) => !JSON.stringify(account).includes("access")));
   const rows = (await database.prepare("SELECT access_token, refresh_token FROM connections").all()).results;
   assert.ok(rows.every((row) => row.access_token !== "x-access" && row.access_token !== "linkedin-access"));
@@ -123,7 +163,7 @@ try {
   const expired = (await publish()).find((result) => result.provider === "linkedin");
   assert.equal(expired.kind, "failed");
   assert.equal(expired.reconnect, true);
-  console.info("Worker checks passed: simultaneous OAuth, PKCE, encrypted D1 tokens, publishing, partial failures, uncertain delivery, and token refresh. All provider requests were simulated.");
+  console.info("Worker checks passed: staged drafts, single-use draft links, simultaneous OAuth, PKCE, encrypted D1 tokens, publishing, partial failures, uncertain delivery, and token refresh. All provider requests were simulated.");
 } finally {
   await worker.dispose();
 }
