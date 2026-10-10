@@ -21,7 +21,7 @@
     "mcp": "node mcp/server.ts",
     "db:migrate:local": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 migrations apply DB --local --config wrangler.local.jsonc --persist-to .wrangler/state",
     "db:generate": "drizzle-kit generate",
-    "db:migrate:cloudflare": "wrangler d1 migrations apply twofold-db --remote --config wrangler.direct.jsonc"
+    "db:migrate:cloudflare": "wrangler d1 migrations apply DB --remote --config wrangler.direct.jsonc"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -75,5 +75,10 @@
     "vite": "8.0.13",
     "wrangler": "4.92.0"
   },
-  "type": "module"
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/effective-shipping/effective-shipping-post.git"
+  }
 }

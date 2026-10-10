@@ -17,20 +17,14 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "twofold-db",
-      "database_id": "b9f838b6-3198-4f86-8e5c-d3594012a080",
+      "database_name": "effective-shipping-post-db",
+      "database_id": "00000000-0000-4000-8000-000000000000",
       "migrations_dir": "drizzle"
     }
   ],
   "vars": {
     "LINKEDIN_VERSION": "202608"
   },
-  "routes": [
-    {
-      "pattern": "post.effectiveshipping.com",
-      "custom_domain": true
-    }
-  ],
   "observability": {
     "enabled": true
   }
